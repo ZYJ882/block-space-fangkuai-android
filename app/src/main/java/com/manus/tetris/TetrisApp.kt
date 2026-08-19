@@ -676,16 +676,34 @@ private fun TouchControls(
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
             val controlWidth = if (maxWidth >= 340.dp) 64.dp else 56.dp
             val controlHeight = if (maxWidth >= 340.dp) 58.dp else 54.dp
+            val clusterSpacing = 8.dp
+            val clusterWidth = controlWidth * 2 + clusterSpacing
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                ControlDisc("←", ActionBlue, enabled, controlWidth, controlHeight, onMoveLeft, repeatOnHold = true)
-                ControlDisc("→", ActionBlue, enabled, controlWidth, controlHeight, onMoveRight, repeatOnHold = true)
-                ControlDisc("↓", ActionBlue, enabled, controlWidth, controlHeight, onSoftDrop, repeatOnHold = true)
-                ControlDisc("⇊", ActionGold, enabled, controlWidth, controlHeight, onHardDrop)
-                ControlDisc("↻", ActionPurple, enabled, controlWidth, controlHeight, onRotate)
+                Column(
+                    modifier = Modifier.width(clusterWidth),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(clusterSpacing)
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(clusterSpacing)) {
+                        ControlDisc("←", ActionBlue, enabled, controlWidth, controlHeight, onMoveLeft, repeatOnHold = true)
+                        ControlDisc("→", ActionBlue, enabled, controlWidth, controlHeight, onMoveRight, repeatOnHold = true)
+                    }
+                    ControlDisc("↓", ActionBlue, enabled, controlWidth, controlHeight, onSoftDrop, repeatOnHold = true)
+                }
+
+                Column(
+                    modifier = Modifier.width(clusterWidth),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(clusterSpacing)
+                ) {
+                    ControlDisc("↻", ActionPurple, enabled, controlWidth, controlHeight, onRotate)
+                    ControlDisc("⇊", ActionGold, enabled, controlWidth, controlHeight, onHardDrop)
+                }
             }
         }
         Button(
