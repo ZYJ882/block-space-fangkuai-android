@@ -209,6 +209,7 @@ private fun GameScreen(
     val board = game.board()
     val activePiece = game.activePiece
     val ghostPiece = game.ghostPiece()
+    val scoreEvent = game.lastScoreEvent
 
     Column(
         modifier = Modifier
@@ -225,7 +226,13 @@ private fun GameScreen(
             onRestart = onRestart
         )
         Spacer(Modifier.height(4.dp))
-        ScoreBanner(score = game.score)
+        ScoreBanner(
+            score = game.score,
+            eventTitle = scoreEvent?.title,
+            eventPoints = scoreEvent?.points ?: 0,
+            combo = game.combo,
+            b2bReady = game.isBackToBack
+        )
         Spacer(Modifier.height(5.dp))
 
         BoxWithConstraints(
@@ -362,14 +369,42 @@ private fun HeaderAction(symbol: String, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ScoreBanner(score: Int) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+private fun ScoreBanner(
+    score: Int,
+    eventTitle: String?,
+    eventPoints: Int,
+    combo: Int,
+    b2bReady: Boolean
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(1.dp)
+    ) {
         Text("当前得分", style = MaterialTheme.typography.labelLarge, color = Color(0xFFBCE6FF))
         Text(
             score.toString(),
             style = MaterialTheme.typography.titleLarge,
             color = Color.White
         )
+        when {
+            eventTitle != null -> Text(
+                "$eventTitle  +$eventPoints",
+                style = MaterialTheme.typography.labelLarge,
+                color = ActionGold
+            )
+            b2bReady -> Text(
+                "B2B READY",
+                style = MaterialTheme.typography.labelLarge,
+                color = Color(0xFFD39AFF)
+            )
+        }
+        if (combo > 0) {
+            Text(
+                "COMBO ×$combo",
+                style = MaterialTheme.typography.labelLarge,
+                color = Color(0xFF86EEBB)
+            )
+        }
     }
 }
 
