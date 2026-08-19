@@ -29,7 +29,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,11 +59,11 @@ private val ButtonSurface = Color(0xFF182A3E)
 fun TetrisApp() {
     val game = remember { TetrisGame() }
     var revision by remember { mutableIntStateOf(0) }
-    val currentRevision = revision
+    var hasStarted by rememberSaveable { mutableStateOf(false) }
 
-    LaunchedEffect(game) {
+    LaunchedEffect(game, hasStarted) {
         while (isActive) {
-            if (!game.isPaused && !game.isGameOver) {
+            if (hasStarted && !game.isPaused && !game.isGameOver) {
                 delay(game.fallDelayMillis)
                 game.tick()
                 revision++
@@ -76,17 +78,98 @@ fun TetrisApp() {
         revision++
     }
 
-    GameScreen(
-        game = game,
-        revision = currentRevision,
-        onMoveLeft = { updateGame { game.moveLeft() } },
-        onMoveRight = { updateGame { game.moveRight() } },
-        onRotate = { updateGame { game.rotateClockwise() } },
-        onSoftDrop = { updateGame { game.softDrop() } },
-        onHardDrop = { updateGame { game.hardDrop() } },
-        onPause = { updateGame { game.togglePause() } },
-        onRestart = { updateGame { game.startNewGame() } }
-    )
+    if (!hasStarted) {
+        StartScreen(
+            onStart = {
+                updateGame { game.startNewGame() }
+                hasStarted = true
+            }
+        )
+    } else {
+        GameScreen(
+            game = game,
+            revision = revision,
+            onMoveLeft = { updateGame { game.moveLeft() } },
+            onMoveRight = { updateGame { game.moveRight() } },
+            onRotate = { updateGame { game.rotateClockwise() } },
+            onSoftDrop = { updateGame { game.softDrop() } },
+            onHardDrop = { updateGame { game.hardDrop() } },
+            onPause = { updateGame { game.togglePause() } },
+            onRestart = { updateGame { game.startNewGame() } }
+        )
+    }
+}
+
+@Composable
+private fun StartScreen(onStart: () -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+            .padding(horizontal = 28.dp, vertical = 28.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("方块空间", style = MaterialTheme.typography.headlineLarge)
+        Text(
+            "BLOCK SPACE",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary
+        )
+        Spacer(Modifier.height(28.dp))
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            shape = RoundedCornerShape(24.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 28.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                StartMark()
+                Text("经典俄罗斯方块", style = MaterialTheme.typography.titleLarge)
+                Text(
+                    "点击开始后，方块才会下落。\n消除更多行，挑战更高分。",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(4.dp))
+                Button(
+                    onClick = onStart,
+                    modifier = Modifier.fillMaxWidth().height(54.dp),
+                    shape = RoundedCornerShape(15.dp)
+                ) {
+                    Text("开始游戏", style = MaterialTheme.typography.titleMedium)
+                }
+            }
+        }
+        Spacer(Modifier.height(20.dp))
+        Text(
+            "左移 · 旋转 · 直落",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun StartMark() {
+    Canvas(modifier = Modifier.size(148.dp)) {
+        val side = size.width / 3.5f
+        val blocks = listOf(1 to 0, 0 to 1, 1 to 1, 2 to 1)
+        val startX = (size.width - side * 3f) / 2f
+        val startY = (size.height - side * 2f) / 2f
+        blocks.forEach { (column, row) ->
+            drawBlock(
+                color = Color(TetrominoType.T.color),
+                left = startX + column * side,
+                top = startY + row * side,
+                side = side
+            )
+        }
+    }
 }
 
 @Composable
