@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,9 +15,11 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredWidthIn
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -205,7 +208,9 @@ private fun GameScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(ArenaBackground)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .statusBarsPadding()
+            .navigationBarsPadding()
+            .padding(horizontal = 10.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         GameTopBar(
@@ -213,66 +218,79 @@ private fun GameScreen(
             onPause = onPause,
             onRestart = onRestart
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
         ScoreBanner(score = game.score)
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(5.dp))
 
-        Row(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
-            verticalAlignment = Alignment.CenterVertically
+            contentAlignment = Alignment.Center
         ) {
-            SideInfoPanel(
-                score = game.score,
-                lines = game.lines,
-                level = game.level,
-                modifier = Modifier
-                    .width(70.dp)
-                    .fillMaxHeight()
-            )
+            val sideInfoWidth = 54.dp
+            val previewWidth = 62.dp
+            val sectionGap = 5.dp
+            val widestBoard = maxWidth - sideInfoWidth - previewWidth - sectionGap * 2
+            val boardHeight = minOf(widestBoard * 2f, maxHeight)
+            val boardWidth = boardHeight / 2f
+            val playAreaWidth = boardWidth + sideInfoWidth + previewWidth + sectionGap * 2
 
-            Box(
+            Row(
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight(),
-                contentAlignment = Alignment.Center
+                    .width(playAreaWidth)
+                    .height(boardHeight),
+                horizontalArrangement = Arrangement.spacedBy(sectionGap),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                TetrisBoard(
-                    board = board,
-                    activePiece = activePiece,
-                    ghostPiece = ghostPiece,
+                SideInfoPanel(
+                    score = game.score,
+                    lines = game.lines,
+                    level = game.level,
                     modifier = Modifier
+                        .width(sideInfoWidth)
                         .fillMaxHeight()
-                        .aspectRatio(0.5f, matchHeightConstraintsFirst = true)
                 )
 
-                when {
-                    game.isGameOver -> GameOverlay(
-                        title = "游戏结束",
-                        subtitle = "本局得分 ${game.score}",
-                        buttonLabel = "再来一局",
-                        onClick = onRestart
+                Box(
+                    modifier = Modifier
+                        .width(boardWidth)
+                        .fillMaxHeight(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    TetrisBoard(
+                        board = board,
+                        activePiece = activePiece,
+                        ghostPiece = ghostPiece,
+                        modifier = Modifier.fillMaxSize()
                     )
-                    game.isPaused -> GameOverlay(
-                        title = "已暂停",
-                        subtitle = "准备好后继续挑战",
-                        buttonLabel = "继续游戏",
-                        onClick = onPause
-                    )
-                }
-            }
 
-            UpcomingPanel(
-                types = game.upcomingTypes,
-                modifier = Modifier
-                    .width(76.dp)
-                    .fillMaxHeight()
-            )
+                    when {
+                        game.isGameOver -> GameOverlay(
+                            title = "游戏结束",
+                            subtitle = "本局得分 ${game.score}",
+                            buttonLabel = "再来一局",
+                            onClick = onRestart
+                        )
+                        game.isPaused -> GameOverlay(
+                            title = "已暂停",
+                            subtitle = "准备好后继续挑战",
+                            buttonLabel = "继续游戏",
+                            onClick = onPause
+                        )
+                    }
+                }
+
+                UpcomingPanel(
+                    types = game.upcomingTypes,
+                    modifier = Modifier
+                        .width(previewWidth)
+                        .fillMaxHeight()
+                )
+            }
         }
 
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(4.dp))
         TouchControls(
             paused = game.isPaused,
             gameOver = game.isGameOver,
@@ -291,22 +309,22 @@ private fun GameTopBar(paused: Boolean, onPause: () -> Unit, onRestart: () -> Un
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
     ) {
         Card(
             modifier = Modifier.weight(1f),
             colors = CardDefaults.cardColors(containerColor = PanelBlue.copy(alpha = 0.82f)),
             border = BorderStroke(1.dp, PanelStroke.copy(alpha = 0.85f)),
-            shape = RoundedCornerShape(18.dp)
+            shape = RoundedCornerShape(14.dp)
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp),
+                modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(9.dp)
+                horizontalArrangement = Arrangement.spacedBy(7.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(28.dp)
+                        .size(24.dp)
                         .clip(CircleShape)
                         .background(ActionGold),
                     contentAlignment = Alignment.Center
@@ -319,24 +337,21 @@ private fun GameTopBar(paused: Boolean, onPause: () -> Unit, onRestart: () -> Un
                 }
             }
         }
-        HeaderAction(if (paused) "▶" else "Ⅱ", if (paused) "继续" else "暂停", onPause)
-        HeaderAction("↺", "重开", onRestart)
+        HeaderAction(if (paused) "▶" else "Ⅱ", onPause)
+        HeaderAction("↺", onRestart)
     }
 }
 
 @Composable
-private fun HeaderAction(symbol: String, label: String, onClick: () -> Unit) {
+private fun HeaderAction(symbol: String, onClick: () -> Unit) {
     Button(
         onClick = onClick,
-        modifier = Modifier.height(48.dp),
-        shape = RoundedCornerShape(15.dp),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 9.dp, vertical = 4.dp),
+        modifier = Modifier.size(42.dp),
+        shape = RoundedCornerShape(13.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
         colors = ButtonDefaults.buttonColors(containerColor = PanelBlueLight, contentColor = Color.White)
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(symbol, style = MaterialTheme.typography.titleMedium)
-            Text(label, style = MaterialTheme.typography.labelLarge)
-        }
+        Text(symbol, style = MaterialTheme.typography.titleMedium)
     }
 }
 
@@ -346,7 +361,7 @@ private fun ScoreBanner(score: Int) {
         Text("当前得分", style = MaterialTheme.typography.labelLarge, color = Color(0xFFBCE6FF))
         Text(
             score.toString(),
-            style = MaterialTheme.typography.headlineLarge,
+            style = MaterialTheme.typography.titleLarge,
             color = Color.White
         )
     }
@@ -614,7 +629,7 @@ private fun TouchControls(
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(5.dp)
+        verticalArrangement = Arrangement.spacedBy(3.dp)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -622,15 +637,15 @@ private fun TouchControls(
             verticalAlignment = Alignment.CenterVertically
         ) {
             ControlDisc("←", "左移", ActionBlue, enabled, onMoveLeft)
-            ControlDisc("↓", "软降", ActionBlue, enabled, onSoftDrop)
-            ControlDisc("↻", "旋转", ActionPurple, enabled, onRotate)
             ControlDisc("→", "右移", ActionBlue, enabled, onMoveRight)
+            ControlDisc("↻", "旋转", ActionPurple, enabled, onRotate)
+            ControlDisc("↓", "软降", ActionBlue, enabled, onSoftDrop)
             ControlDisc("⇊", "直落", ActionGold, enabled, onHardDrop)
         }
         Button(
             onClick = onPause,
             enabled = enabled,
-            modifier = Modifier.height(32.dp),
+            modifier = Modifier.height(30.dp),
             shape = RoundedCornerShape(12.dp),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 0.dp),
             colors = ButtonDefaults.buttonColors(containerColor = PanelBlueLight, contentColor = Color.White)
@@ -652,7 +667,7 @@ private fun ControlDisc(
         Button(
             onClick = onClick,
             enabled = enabled,
-            modifier = Modifier.size(52.dp),
+            modifier = Modifier.size(48.dp),
             shape = CircleShape,
             contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
             colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Color.White)
