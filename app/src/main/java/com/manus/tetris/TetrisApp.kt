@@ -45,6 +45,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -55,6 +56,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import com.manus.tetris.controls.ControlSettings
+import com.manus.tetris.controls.ControlSettingsStore
+import com.manus.tetris.controls.HandlingPreset
 import com.manus.tetris.game.FallingPiece
 import com.manus.tetris.game.PieceLibrary
 import com.manus.tetris.game.TetrisGame
@@ -83,8 +87,17 @@ private val ArenaBackground = Brush.verticalGradient(
 @Composable
 fun TetrisApp() {
     val game = remember { TetrisGame() }
+    val context = LocalContext.current
+    val controlSettingsStore = remember(context) { ControlSettingsStore(context) }
+    var controlSettings by remember { mutableStateOf(controlSettingsStore.load()) }
     var revision by remember { mutableIntStateOf(0) }
     var hasStarted by rememberSaveable { mutableStateOf(false) }
+    var showControlSettings by rememberSaveable { mutableStateOf(false) }
+
+    fun updateControlSettings(next: ControlSettings) {
+        controlSettings = next
+        controlSettingsStore.save(next)
+    }
 
     LaunchedEffect(game, hasStarted) {
         while (isActive) {
@@ -111,17 +124,31 @@ fun TetrisApp() {
             }
         )
     } else {
-        GameScreen(
-            game = game,
-            revision = revision,
-            onMoveLeft = { updateGame { game.moveLeft() } },
-            onMoveRight = { updateGame { game.moveRight() } },
-            onRotate = { updateGame { game.rotateClockwise() } },
-            onSoftDrop = { updateGame { game.softDrop() } },
-            onHardDrop = { updateGame { game.hardDrop() } },
-            onPause = { updateGame { game.togglePause() } },
-            onRestart = { updateGame { game.startNewGame() } }
-        )
+        Box(modifier = Modifier.fillMaxSize()) {
+            GameScreen(
+                game = game,
+                revision = revision,
+                onMoveLeft = { updateGame { game.moveLeft() } },
+                onMoveRight = { updateGame { game.moveRight() } },
+                onRotate = { updateGame { game.rotateClockwise() } },
+                onSoftDrop = { updateGame { game.softDrop() } },
+                onHardDrop = { updateGame { game.hardDrop() } },
+                onPause = { updateGame { game.togglePause() } },
+                onRestart = { updateGame { game.startNewGame() } },
+                controlSettings = controlSettings,
+                onOpenControlSettings = {
+                    if (!game.isPaused) updateGame { game.togglePause() }
+                    showControlSettings = true
+                }
+            )
+            if (showControlSettings) {
+                ControlSettingsOverlay(
+                    settings = controlSettings,
+                    onSettingsChange = ::updateControlSettings,
+                    onDismiss = { showControlSettings = false }
+                )
+            }
+        }
     }
 }
 
@@ -203,7 +230,9 @@ private fun GameScreen(
     onSoftDrop: () -> Unit,
     onHardDrop: () -> Unit,
     onPause: () -> Unit,
-    onRestart: () -> Unit
+    onRestart: () -> Unit,
+    controlSettings: ControlSettings,
+    onOpenControlSettings: () -> Unit
 ) {
     @Suppress("UNUSED_VARIABLE")
     val observedRevision = revision
@@ -224,7 +253,8 @@ private fun GameScreen(
         GameTopBar(
             paused = game.isPaused,
             onPause = onPause,
-            onRestart = onRestart
+            onRestart = onRestart,
+            onOpenControlSettings = onOpenControlSettings
         )
         Spacer(Modifier.height(4.dp))
         ScoreBanner(
@@ -313,13 +343,19 @@ private fun GameScreen(
             onRotate = onRotate,
             onSoftDrop = onSoftDrop,
             onHardDrop = onHardDrop,
-            onPause = onPause
+            onPause = onPause,
+            controlSettings = controlSettings
         )
     }
 }
 
 @Composable
-private fun GameTopBar(paused: Boolean, onPause: () -> Unit, onRestart: () -> Unit) {
+private fun GameTopBar(
+    paused: Boolean,
+    onPause: () -> Unit,
+    onRestart: () -> Unit,
+    onOpenControlSettings: () -> Unit
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -353,6 +389,7 @@ private fun GameTopBar(paused: Boolean, onPause: () -> Unit, onRestart: () -> Un
         }
         HeaderAction(if (paused) "▶" else "Ⅱ", onPause)
         HeaderAction("↺", onRestart)
+        HeaderAction("⚙", onOpenControlSettings)
     }
 }
 
@@ -657,6 +694,96 @@ private fun GameOverlay(title: String, subtitle: String, buttonLabel: String, on
 }
 
 @Composable
+private fun ControlSettingsOverlay(
+    settings: ControlSettings,
+    onSettingsChange: (ControlSettings) -> Unit,
+    onDismiss: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xB7081636))
+            .padding(horizontal = 22.dp, vertical = 28.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .requiredWidthIn(max = 360.dp),
+            colors = CardDefaults.cardColors(containerColor = BoardBackground),
+            border = BorderStroke(1.dp, PanelStroke),
+            shape = RoundedCornerShape(22.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text("控制设置", style = MaterialTheme.typography.titleLarge, color = Color.White)
+                Text(
+                    "长按速度",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color(0xFFBFE8FF)
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    HandlingPreset.entries.forEach { preset ->
+                        val selected = settings.preset == preset
+                        Button(
+                            onClick = { onSettingsChange(settings.copy(preset = preset)) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp, vertical = 0.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (selected) ActionGold else PanelBlueLight,
+                                contentColor = Color.White
+                            )
+                        ) {
+                            Text(preset.label, style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                }
+                Text(
+                    "${settings.preset.initialDelayMillis}ms 启动 · ${settings.preset.repeatIntervalMillis}ms 重复",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color(0xFFD5ECFF)
+                )
+                Button(
+                    onClick = { onSettingsChange(settings.copy(mirrored = !settings.mirrored)) },
+                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (settings.mirrored) ActionPurple else PanelBlueLight,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text(
+                        if (settings.mirrored) "↔ 已启用镜像布局" else "↔ 标准双拇指布局",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+                Text(
+                    if (settings.mirrored) "左侧：旋转/直降 · 右侧：移动/软降" else "左侧：移动/软降 · 右侧：旋转/直降",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color(0xFFBFE8FF),
+                    textAlign = TextAlign.Center
+                )
+                Button(
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth().height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = ActionGold, contentColor = Color.White)
+                ) {
+                    Text("完成", style = MaterialTheme.typography.titleMedium)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun TouchControls(
     paused: Boolean,
     gameOver: Boolean,
@@ -665,7 +792,8 @@ private fun TouchControls(
     onRotate: () -> Unit,
     onSoftDrop: () -> Unit,
     onHardDrop: () -> Unit,
-    onPause: () -> Unit
+    onPause: () -> Unit,
+    controlSettings: ControlSettings
 ) {
     val enabled = !gameOver
     Column(
@@ -684,25 +812,50 @@ private fun TouchControls(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(
-                    modifier = Modifier.width(clusterWidth),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(clusterSpacing)
-                ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(clusterSpacing)) {
-                        ControlDisc("←", ActionBlue, enabled, controlWidth, controlHeight, onMoveLeft, repeatOnHold = true)
-                        ControlDisc("→", ActionBlue, enabled, controlWidth, controlHeight, onMoveRight, repeatOnHold = true)
-                    }
-                    ControlDisc("↓", ActionBlue, enabled, controlWidth, controlHeight, onSoftDrop, repeatOnHold = true)
-                }
-
-                Column(
-                    modifier = Modifier.width(clusterWidth),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(clusterSpacing)
-                ) {
-                    ControlDisc("↻", ActionPurple, enabled, controlWidth, controlHeight, onRotate)
-                    ControlDisc("⇊", ActionGold, enabled, controlWidth, controlHeight, onHardDrop)
+                if (controlSettings.mirrored) {
+                    ActionControlCluster(
+                        width = clusterWidth,
+                        buttonWidth = controlWidth,
+                        buttonHeight = controlHeight,
+                        enabled = enabled,
+                        onRotate = onRotate,
+                        onHardDrop = onHardDrop,
+                        spacing = clusterSpacing
+                    )
+                    MovementControlCluster(
+                        width = clusterWidth,
+                        buttonWidth = controlWidth,
+                        buttonHeight = controlHeight,
+                        enabled = enabled,
+                        onMoveLeft = onMoveLeft,
+                        onMoveRight = onMoveRight,
+                        onSoftDrop = onSoftDrop,
+                        initialDelayMillis = controlSettings.preset.initialDelayMillis,
+                        repeatIntervalMillis = controlSettings.preset.repeatIntervalMillis,
+                        spacing = clusterSpacing
+                    )
+                } else {
+                    MovementControlCluster(
+                        width = clusterWidth,
+                        buttonWidth = controlWidth,
+                        buttonHeight = controlHeight,
+                        enabled = enabled,
+                        onMoveLeft = onMoveLeft,
+                        onMoveRight = onMoveRight,
+                        onSoftDrop = onSoftDrop,
+                        initialDelayMillis = controlSettings.preset.initialDelayMillis,
+                        repeatIntervalMillis = controlSettings.preset.repeatIntervalMillis,
+                        spacing = clusterSpacing
+                    )
+                    ActionControlCluster(
+                        width = clusterWidth,
+                        buttonWidth = controlWidth,
+                        buttonHeight = controlHeight,
+                        enabled = enabled,
+                        onRotate = onRotate,
+                        onHardDrop = onHardDrop,
+                        spacing = clusterSpacing
+                    )
                 }
             }
         }
@@ -720,6 +873,52 @@ private fun TouchControls(
 }
 
 @Composable
+private fun MovementControlCluster(
+    width: Dp,
+    buttonWidth: Dp,
+    buttonHeight: Dp,
+    enabled: Boolean,
+    onMoveLeft: () -> Unit,
+    onMoveRight: () -> Unit,
+    onSoftDrop: () -> Unit,
+    initialDelayMillis: Long,
+    repeatIntervalMillis: Long,
+    spacing: Dp
+) {
+    Column(
+        modifier = Modifier.width(width),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(spacing)
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
+            ControlDisc("←", ActionBlue, enabled, buttonWidth, buttonHeight, onMoveLeft, true, initialDelayMillis, repeatIntervalMillis)
+            ControlDisc("→", ActionBlue, enabled, buttonWidth, buttonHeight, onMoveRight, true, initialDelayMillis, repeatIntervalMillis)
+        }
+        ControlDisc("↓", ActionBlue, enabled, buttonWidth, buttonHeight, onSoftDrop, true, initialDelayMillis, repeatIntervalMillis)
+    }
+}
+
+@Composable
+private fun ActionControlCluster(
+    width: Dp,
+    buttonWidth: Dp,
+    buttonHeight: Dp,
+    enabled: Boolean,
+    onRotate: () -> Unit,
+    onHardDrop: () -> Unit,
+    spacing: Dp
+) {
+    Column(
+        modifier = Modifier.width(width),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(spacing)
+    ) {
+        ControlDisc("↻", ActionPurple, enabled, buttonWidth, buttonHeight, onRotate)
+        ControlDisc("⇊", ActionGold, enabled, buttonWidth, buttonHeight, onHardDrop)
+    }
+}
+
+@Composable
 private fun ControlDisc(
     symbol: String,
     color: Color,
@@ -727,7 +926,9 @@ private fun ControlDisc(
     buttonWidth: Dp,
     buttonHeight: Dp,
     onClick: () -> Unit,
-    repeatOnHold: Boolean = false
+    repeatOnHold: Boolean = false,
+    initialDelayMillis: Long = 0L,
+    repeatIntervalMillis: Long = 0L
 ) {
     if (!repeatOnHold) {
         Button(
@@ -752,16 +953,16 @@ private fun ControlDisc(
             .size(width = buttonWidth, height = buttonHeight)
             .clip(RoundedCornerShape(16.dp))
             .background(if (enabled) color else color.copy(alpha = 0.38f))
-            .pointerInput(enabled) {
+            .pointerInput(enabled, initialDelayMillis, repeatIntervalMillis) {
                 if (!enabled) return@pointerInput
                 detectTapGestures(
                     onPress = {
                         latestAction()
                         repeatJobHolder[0] = scope.launch {
-                            delay(150)
+                            delay(initialDelayMillis)
                             while (true) {
                                 latestAction()
-                                delay(50)
+                                delay(repeatIntervalMillis)
                             }
                         }
                         try {
