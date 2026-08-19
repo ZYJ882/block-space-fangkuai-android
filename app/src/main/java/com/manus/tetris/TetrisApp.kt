@@ -4,6 +4,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -56,8 +58,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import com.manus.tetris.controls.ControlAction
 import com.manus.tetris.controls.ControlSettings
 import com.manus.tetris.controls.ControlSettingsStore
+import com.manus.tetris.controls.ControlSlot
+import com.manus.tetris.controls.CustomControlLayout
 import com.manus.tetris.controls.HandlingPreset
 import com.manus.tetris.game.FallingPiece
 import com.manus.tetris.game.PieceLibrary
@@ -699,6 +704,7 @@ private fun ControlSettingsOverlay(
     onSettingsChange: (ControlSettings) -> Unit,
     onDismiss: () -> Unit
 ) {
+    var selectedAction by remember { mutableStateOf(ControlAction.MOVE_LEFT) }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -715,7 +721,9 @@ private fun ControlSettingsOverlay(
             shape = RoundedCornerShape(22.dp)
         ) {
             Column(
-                modifier = Modifier.padding(20.dp),
+                modifier = Modifier
+                    .padding(20.dp)
+                    .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -750,22 +758,35 @@ private fun ControlSettingsOverlay(
                     style = MaterialTheme.typography.labelLarge,
                     color = Color(0xFFD5ECFF)
                 )
+
+                Text("自定义键位", style = MaterialTheme.typography.titleMedium, color = Color.White)
+                Text(
+                    "先选择动作，再点击目标槽位。已占用的槽位会自动交换，不会重叠。",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color(0xFFBFE8FF),
+                    textAlign = TextAlign.Center
+                )
+                ActionSelector(
+                    selectedAction = selectedAction,
+                    onSelect = { selectedAction = it }
+                )
+                CustomSlotEditor(
+                    layout = settings.layout,
+                    selectedAction = selectedAction,
+                    onSlotSelected = { slot ->
+                        onSettingsChange(settings.copy(layout = settings.layout.moveActionTo(selectedAction, slot)))
+                    }
+                )
                 Button(
-                    onClick = { onSettingsChange(settings.copy(mirrored = !settings.mirrored)) },
-                    modifier = Modifier.fillMaxWidth().height(48.dp),
+                    onClick = { onSettingsChange(settings.copy(layout = CustomControlLayout.standard())) },
+                    modifier = Modifier.fillMaxWidth().height(42.dp),
                     shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (settings.mirrored) ActionPurple else PanelBlueLight,
-                        contentColor = Color.White
-                    )
+                    colors = ButtonDefaults.buttonColors(containerColor = PanelBlueLight, contentColor = Color.White)
                 ) {
-                    Text(
-                        if (settings.mirrored) "↔ 已启用镜像布局" else "↔ 标准双拇指布局",
-                        style = MaterialTheme.typography.titleMedium
-                    )
+                    Text("恢复标准布局", style = MaterialTheme.typography.labelLarge)
                 }
                 Text(
-                    if (settings.mirrored) "左侧：旋转/直降 · 右侧：移动/软降" else "左侧：移动/软降 · 右侧：旋转/直降",
+                    "边界：5 个固定槽位、每个动作必须存在、每个槽位只能放置一个动作。",
                     style = MaterialTheme.typography.labelLarge,
                     color = Color(0xFFBFE8FF),
                     textAlign = TextAlign.Center
@@ -780,6 +801,112 @@ private fun ControlSettingsOverlay(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ActionSelector(
+    selectedAction: ControlAction,
+    onSelect: (ControlAction) -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            ControlAction.entries.take(3).forEach { action ->
+                ActionSelectorButton(action, selectedAction == action, Modifier.weight(1f), onSelect)
+            }
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Spacer(Modifier.weight(0.5f))
+            ControlAction.entries.drop(3).forEach { action ->
+                ActionSelectorButton(action, selectedAction == action, Modifier.weight(1f), onSelect)
+            }
+            Spacer(Modifier.weight(0.5f))
+        }
+    }
+}
+
+@Composable
+private fun ActionSelectorButton(
+    action: ControlAction,
+    selected: Boolean,
+    modifier: Modifier,
+    onSelect: (ControlAction) -> Unit
+) {
+    Button(
+        onClick = { onSelect(action) },
+        modifier = modifier.height(40.dp),
+        shape = RoundedCornerShape(12.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 1.dp, vertical = 0.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (selected) ActionGold else PanelBlueLight,
+            contentColor = Color.White
+        )
+    ) {
+        Text("${action.symbol} ${action.label}", style = MaterialTheme.typography.labelLarge)
+    }
+}
+
+@Composable
+private fun CustomSlotEditor(
+    layout: CustomControlLayout,
+    selectedAction: ControlAction,
+    onSlotSelected: (ControlSlot) -> Unit
+) {
+    val spacing = 6.dp
+    val clusterWidth = 126.dp
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(
+            modifier = Modifier.width(clusterWidth),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(spacing)
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
+                LayoutSlotButton(ControlSlot.LEFT_TOP_LEFT, layout, selectedAction, onSlotSelected)
+                LayoutSlotButton(ControlSlot.LEFT_TOP_RIGHT, layout, selectedAction, onSlotSelected)
+            }
+            LayoutSlotButton(ControlSlot.LEFT_BOTTOM, layout, selectedAction, onSlotSelected)
+        }
+        Column(
+            modifier = Modifier.width(clusterWidth),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(spacing)
+        ) {
+            LayoutSlotButton(ControlSlot.RIGHT_TOP, layout, selectedAction, onSlotSelected)
+            LayoutSlotButton(ControlSlot.RIGHT_BOTTOM, layout, selectedAction, onSlotSelected)
+        }
+    }
+}
+
+@Composable
+private fun LayoutSlotButton(
+    slot: ControlSlot,
+    layout: CustomControlLayout,
+    selectedAction: ControlAction,
+    onSlotSelected: (ControlSlot) -> Unit
+) {
+    val action = layout.actionAt(slot)
+    val selected = action == selectedAction
+    Button(
+        onClick = { onSlotSelected(slot) },
+        modifier = Modifier.size(width = 60.dp, height = 48.dp),
+        shape = RoundedCornerShape(13.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (selected) ActionGold else PanelBlueLight,
+            contentColor = Color.White
+        )
+    ) {
+        Text(action.symbol, style = MaterialTheme.typography.titleLarge)
     }
 }
 
@@ -804,60 +931,19 @@ private fun TouchControls(
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
             val controlWidth = if (maxWidth >= 340.dp) 64.dp else 56.dp
             val controlHeight = if (maxWidth >= 340.dp) 58.dp else 54.dp
-            val clusterSpacing = 8.dp
-            val clusterWidth = controlWidth * 2 + clusterSpacing
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                if (controlSettings.mirrored) {
-                    ActionControlCluster(
-                        width = clusterWidth,
-                        buttonWidth = controlWidth,
-                        buttonHeight = controlHeight,
-                        enabled = enabled,
-                        onRotate = onRotate,
-                        onHardDrop = onHardDrop,
-                        spacing = clusterSpacing
-                    )
-                    MovementControlCluster(
-                        width = clusterWidth,
-                        buttonWidth = controlWidth,
-                        buttonHeight = controlHeight,
-                        enabled = enabled,
-                        onMoveLeft = onMoveLeft,
-                        onMoveRight = onMoveRight,
-                        onSoftDrop = onSoftDrop,
-                        initialDelayMillis = controlSettings.preset.initialDelayMillis,
-                        repeatIntervalMillis = controlSettings.preset.repeatIntervalMillis,
-                        spacing = clusterSpacing
-                    )
-                } else {
-                    MovementControlCluster(
-                        width = clusterWidth,
-                        buttonWidth = controlWidth,
-                        buttonHeight = controlHeight,
-                        enabled = enabled,
-                        onMoveLeft = onMoveLeft,
-                        onMoveRight = onMoveRight,
-                        onSoftDrop = onSoftDrop,
-                        initialDelayMillis = controlSettings.preset.initialDelayMillis,
-                        repeatIntervalMillis = controlSettings.preset.repeatIntervalMillis,
-                        spacing = clusterSpacing
-                    )
-                    ActionControlCluster(
-                        width = clusterWidth,
-                        buttonWidth = controlWidth,
-                        buttonHeight = controlHeight,
-                        enabled = enabled,
-                        onRotate = onRotate,
-                        onHardDrop = onHardDrop,
-                        spacing = clusterSpacing
-                    )
-                }
-            }
+            CustomControlLayoutGrid(
+                layout = controlSettings.layout,
+                enabled = enabled,
+                buttonWidth = controlWidth,
+                buttonHeight = controlHeight,
+                initialDelayMillis = controlSettings.preset.initialDelayMillis,
+                repeatIntervalMillis = controlSettings.preset.repeatIntervalMillis,
+                onMoveLeft = onMoveLeft,
+                onMoveRight = onMoveRight,
+                onSoftDrop = onSoftDrop,
+                onRotate = onRotate,
+                onHardDrop = onHardDrop
+            )
         }
         Button(
             onClick = onPause,
@@ -873,48 +959,68 @@ private fun TouchControls(
 }
 
 @Composable
-private fun MovementControlCluster(
-    width: Dp,
+private fun CustomControlLayoutGrid(
+    layout: CustomControlLayout,
+    enabled: Boolean,
     buttonWidth: Dp,
     buttonHeight: Dp,
-    enabled: Boolean,
+    initialDelayMillis: Long,
+    repeatIntervalMillis: Long,
     onMoveLeft: () -> Unit,
     onMoveRight: () -> Unit,
     onSoftDrop: () -> Unit,
-    initialDelayMillis: Long,
-    repeatIntervalMillis: Long,
-    spacing: Dp
+    onRotate: () -> Unit,
+    onHardDrop: () -> Unit
 ) {
-    Column(
-        modifier = Modifier.width(width),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(spacing)
+    val spacing = 8.dp
+    val clusterWidth = buttonWidth * 2 + spacing
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-            ControlDisc("←", ActionBlue, enabled, buttonWidth, buttonHeight, onMoveLeft, true, initialDelayMillis, repeatIntervalMillis)
-            ControlDisc("→", ActionBlue, enabled, buttonWidth, buttonHeight, onMoveRight, true, initialDelayMillis, repeatIntervalMillis)
+        Column(
+            modifier = Modifier.width(clusterWidth),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(spacing)
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
+                ControlButtonForAction(layout.actionAt(ControlSlot.LEFT_TOP_LEFT), enabled, buttonWidth, buttonHeight, initialDelayMillis, repeatIntervalMillis, onMoveLeft, onMoveRight, onSoftDrop, onRotate, onHardDrop)
+                ControlButtonForAction(layout.actionAt(ControlSlot.LEFT_TOP_RIGHT), enabled, buttonWidth, buttonHeight, initialDelayMillis, repeatIntervalMillis, onMoveLeft, onMoveRight, onSoftDrop, onRotate, onHardDrop)
+            }
+            ControlButtonForAction(layout.actionAt(ControlSlot.LEFT_BOTTOM), enabled, buttonWidth, buttonHeight, initialDelayMillis, repeatIntervalMillis, onMoveLeft, onMoveRight, onSoftDrop, onRotate, onHardDrop)
         }
-        ControlDisc("↓", ActionBlue, enabled, buttonWidth, buttonHeight, onSoftDrop, true, initialDelayMillis, repeatIntervalMillis)
+        Column(
+            modifier = Modifier.width(clusterWidth),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(spacing)
+        ) {
+            ControlButtonForAction(layout.actionAt(ControlSlot.RIGHT_TOP), enabled, buttonWidth, buttonHeight, initialDelayMillis, repeatIntervalMillis, onMoveLeft, onMoveRight, onSoftDrop, onRotate, onHardDrop)
+            ControlButtonForAction(layout.actionAt(ControlSlot.RIGHT_BOTTOM), enabled, buttonWidth, buttonHeight, initialDelayMillis, repeatIntervalMillis, onMoveLeft, onMoveRight, onSoftDrop, onRotate, onHardDrop)
+        }
     }
 }
 
 @Composable
-private fun ActionControlCluster(
-    width: Dp,
+private fun ControlButtonForAction(
+    action: ControlAction,
+    enabled: Boolean,
     buttonWidth: Dp,
     buttonHeight: Dp,
-    enabled: Boolean,
+    initialDelayMillis: Long,
+    repeatIntervalMillis: Long,
+    onMoveLeft: () -> Unit,
+    onMoveRight: () -> Unit,
+    onSoftDrop: () -> Unit,
     onRotate: () -> Unit,
-    onHardDrop: () -> Unit,
-    spacing: Dp
+    onHardDrop: () -> Unit
 ) {
-    Column(
-        modifier = Modifier.width(width),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(spacing)
-    ) {
-        ControlDisc("↻", ActionPurple, enabled, buttonWidth, buttonHeight, onRotate)
-        ControlDisc("⇊", ActionGold, enabled, buttonWidth, buttonHeight, onHardDrop)
+    when (action) {
+        ControlAction.MOVE_LEFT -> ControlDisc(action.symbol, ActionBlue, enabled, buttonWidth, buttonHeight, onMoveLeft, true, initialDelayMillis, repeatIntervalMillis)
+        ControlAction.MOVE_RIGHT -> ControlDisc(action.symbol, ActionBlue, enabled, buttonWidth, buttonHeight, onMoveRight, true, initialDelayMillis, repeatIntervalMillis)
+        ControlAction.SOFT_DROP -> ControlDisc(action.symbol, ActionBlue, enabled, buttonWidth, buttonHeight, onSoftDrop, true, initialDelayMillis, repeatIntervalMillis)
+        ControlAction.ROTATE -> ControlDisc(action.symbol, ActionPurple, enabled, buttonWidth, buttonHeight, onRotate)
+        ControlAction.HARD_DROP -> ControlDisc(action.symbol, ActionGold, enabled, buttonWidth, buttonHeight, onHardDrop)
     }
 }
 
