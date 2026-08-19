@@ -636,11 +636,11 @@ private fun TouchControls(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            ControlDisc("←", "左移", ActionBlue, enabled, onMoveLeft)
-            ControlDisc("→", "右移", ActionBlue, enabled, onMoveRight)
-            ControlDisc("↻", "旋转", ActionPurple, enabled, onRotate)
-            ControlDisc("↓", "软降", ActionBlue, enabled, onSoftDrop)
-            ControlDisc("⇊", "直落", ActionGold, enabled, onHardDrop)
+            ControlDisc("←", ActionBlue, enabled, onMoveLeft)
+            ControlDisc("→", ActionBlue, enabled, onMoveRight)
+            ControlDisc("↓", ActionBlue, enabled, onSoftDrop)
+            ControlDisc("⇊", ActionGold, enabled, onHardDrop)
+            ControlDisc("↻", ActionPurple, enabled, onRotate)
         }
         Button(
             onClick = onPause,
@@ -650,7 +650,7 @@ private fun TouchControls(
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 0.dp),
             colors = ButtonDefaults.buttonColors(containerColor = PanelBlueLight, contentColor = Color.White)
         ) {
-            Text(if (paused) "▶ 继续游戏" else "Ⅱ 暂停游戏", style = MaterialTheme.typography.labelLarge)
+            Text(if (paused) "▶" else "Ⅱ", style = MaterialTheme.typography.labelLarge)
         }
     }
 }
@@ -658,22 +658,18 @@ private fun TouchControls(
 @Composable
 private fun ControlDisc(
     symbol: String,
-    label: String,
     color: Color,
     enabled: Boolean,
     onClick: () -> Unit
 ) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Button(
-            onClick = onClick,
-            enabled = enabled,
-            modifier = Modifier.size(48.dp),
-            shape = CircleShape,
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Color.White)
-        ) {
-            Text(symbol, style = MaterialTheme.typography.titleLarge)
-        }
-        Text(label, style = MaterialTheme.typography.labelLarge, color = Color(0xFFD8EEFF))
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = Modifier.size(48.dp),
+        shape = CircleShape,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Color.White)
+    ) {
+        Text(symbol, style = MaterialTheme.typography.titleLarge)
     }
 }
