@@ -674,17 +674,18 @@ private fun TouchControls(
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-            val controlDiameter = if (maxWidth >= 340.dp) 64.dp else 56.dp
+            val controlWidth = if (maxWidth >= 340.dp) 64.dp else 56.dp
+            val controlHeight = if (maxWidth >= 340.dp) 58.dp else 54.dp
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                ControlDisc("←", ActionBlue, enabled, controlDiameter, onMoveLeft, repeatOnHold = true)
-                ControlDisc("→", ActionBlue, enabled, controlDiameter, onMoveRight, repeatOnHold = true)
-                ControlDisc("↓", ActionBlue, enabled, controlDiameter, onSoftDrop, repeatOnHold = true)
-                ControlDisc("⇊", ActionGold, enabled, controlDiameter, onHardDrop)
-                ControlDisc("↻", ActionPurple, enabled, controlDiameter, onRotate)
+                ControlDisc("←", ActionBlue, enabled, controlWidth, controlHeight, onMoveLeft, repeatOnHold = true)
+                ControlDisc("→", ActionBlue, enabled, controlWidth, controlHeight, onMoveRight, repeatOnHold = true)
+                ControlDisc("↓", ActionBlue, enabled, controlWidth, controlHeight, onSoftDrop, repeatOnHold = true)
+                ControlDisc("⇊", ActionGold, enabled, controlWidth, controlHeight, onHardDrop)
+                ControlDisc("↻", ActionPurple, enabled, controlWidth, controlHeight, onRotate)
             }
         }
         Button(
@@ -705,7 +706,8 @@ private fun ControlDisc(
     symbol: String,
     color: Color,
     enabled: Boolean,
-    diameter: Dp,
+    buttonWidth: Dp,
+    buttonHeight: Dp,
     onClick: () -> Unit,
     repeatOnHold: Boolean = false
 ) {
@@ -713,8 +715,8 @@ private fun ControlDisc(
         Button(
             onClick = onClick,
             enabled = enabled,
-            modifier = Modifier.size(diameter),
-            shape = CircleShape,
+            modifier = Modifier.size(width = buttonWidth, height = buttonHeight),
+            shape = RoundedCornerShape(16.dp),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
             colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Color.White)
         ) {
@@ -729,8 +731,8 @@ private fun ControlDisc(
 
     Box(
         modifier = Modifier
-            .size(diameter)
-            .clip(CircleShape)
+            .size(width = buttonWidth, height = buttonHeight)
+            .clip(RoundedCornerShape(16.dp))
             .background(if (enabled) color else color.copy(alpha = 0.38f))
             .pointerInput(enabled) {
                 if (!enabled) return@pointerInput
@@ -738,10 +740,10 @@ private fun ControlDisc(
                     onPress = {
                         latestAction()
                         repeatJobHolder[0] = scope.launch {
-                            delay(260)
+                            delay(150)
                             while (true) {
                                 latestAction()
-                                delay(72)
+                                delay(50)
                             }
                         }
                         try {
