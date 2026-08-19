@@ -91,7 +91,7 @@ class TetrisGame(private val random: Random = Random.Default) {
 
     private val cells = Array(ROWS) { IntArray(COLUMNS) { EMPTY } }
     private var active: FallingPiece? = null
-    private var next: TetrominoType = randomType()
+    private val upcomingQueue = ArrayDeque<TetrominoType>()
 
     var score: Int = 0
         private set
@@ -105,7 +105,8 @@ class TetrisGame(private val random: Random = Random.Default) {
     val level: Int get() = lines / 10 + 1
     val fallDelayMillis: Long get() = max(120, 820 - (level - 1) * 65).toLong()
     val activePiece: FallingPiece? get() = active
-    val nextType: TetrominoType get() = next
+    val nextType: TetrominoType get() = upcomingQueue.first()
+    val upcomingTypes: List<TetrominoType> get() = upcomingQueue.take(3)
 
     init {
         startNewGame()
@@ -119,7 +120,8 @@ class TetrisGame(private val random: Random = Random.Default) {
         lines = 0
         isPaused = false
         isGameOver = false
-        next = randomType()
+        upcomingQueue.clear()
+        repeat(4) { upcomingQueue.addLast(randomType()) }
         spawnPiece()
     }
 
@@ -229,8 +231,8 @@ class TetrisGame(private val random: Random = Random.Default) {
     }
 
     private fun spawnPiece() {
-        val type = next
-        next = randomType()
+        val type = upcomingQueue.removeFirst()
+        upcomingQueue.addLast(randomType())
         val candidate = FallingPiece(type, rotation = 0, row = 0, column = SPAWN_COLUMN)
         if (canPlace(candidate)) active = candidate else {
             active = null
