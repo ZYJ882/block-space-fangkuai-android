@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredWidthIn
 import androidx.compose.foundation.layout.size
@@ -48,6 +50,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -55,14 +58,16 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import com.manus.tetris.controls.ControlAction
+import com.manus.tetris.controls.ControlAreaGeometry
 import com.manus.tetris.controls.ControlSettings
 import com.manus.tetris.controls.ControlSettingsStore
-import com.manus.tetris.controls.ControlSlot
-import com.manus.tetris.controls.CustomControlLayout
+import com.manus.tetris.controls.FreeControlLayout
+import com.manus.tetris.controls.PixelPoint
 import com.manus.tetris.controls.HandlingPreset
 import com.manus.tetris.game.FallingPiece
 import com.manus.tetris.game.PieceLibrary
@@ -70,6 +75,7 @@ import com.manus.tetris.game.TetrisGame
 import com.manus.tetris.game.TetrominoType
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlin.math.roundToInt
 
 private val ArenaTop = Color(0xFF0A5BBC)
 private val ArenaMid = Color(0xFF063B8A)
@@ -246,111 +252,125 @@ private fun GameScreen(
     val ghostPiece = game.ghostPiece()
     val scoreEvent = game.lastScoreEvent
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
             .background(ArenaBackground)
             .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(horizontal = 10.dp, vertical = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+            .padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
-        GameTopBar(
-            paused = game.isPaused,
-            onPause = onPause,
-            onRestart = onRestart,
-            onOpenControlSettings = onOpenControlSettings
-        )
-        Spacer(Modifier.height(4.dp))
-        ScoreBanner(
-            score = game.score,
-            eventTitle = scoreEvent?.title,
-            eventPoints = scoreEvent?.points ?: 0,
-            combo = game.combo,
-            b2bReady = game.isBackToBack
-        )
-        Spacer(Modifier.height(5.dp))
-
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f),
-            contentAlignment = Alignment.Center
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            val sideInfoWidth = 54.dp
-            val previewWidth = 62.dp
-            val sectionGap = 5.dp
-            val widestBoard = maxWidth - sideInfoWidth - previewWidth - sectionGap * 2
-            val boardHeight = minOf(widestBoard * 2f, maxHeight)
-            val boardWidth = boardHeight / 2f
-            val playAreaWidth = boardWidth + sideInfoWidth + previewWidth + sectionGap * 2
+            GameTopBar(
+                paused = game.isPaused,
+                onPause = onPause,
+                onRestart = onRestart,
+                onOpenControlSettings = onOpenControlSettings
+            )
+            Spacer(Modifier.height(4.dp))
+            ScoreBanner(
+                score = game.score,
+                eventTitle = scoreEvent?.title,
+                eventPoints = scoreEvent?.points ?: 0,
+                combo = game.combo,
+                b2bReady = game.isBackToBack
+            )
+            Spacer(Modifier.height(5.dp))
 
-            Row(
+            BoxWithConstraints(
                 modifier = Modifier
-                    .width(playAreaWidth)
-                    .height(boardHeight),
-                horizontalArrangement = Arrangement.spacedBy(sectionGap),
-                verticalAlignment = Alignment.CenterVertically
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(bottom = 128.dp),
+                contentAlignment = Alignment.Center
             ) {
-                SideInfoPanel(
-                    score = game.score,
-                    lines = game.lines,
-                    level = game.level,
-                    modifier = Modifier
-                        .width(sideInfoWidth)
-                        .fillMaxHeight()
-                )
+                val sideInfoWidth = 54.dp
+                val previewWidth = 62.dp
+                val sectionGap = 5.dp
+                val widestBoard = maxWidth - sideInfoWidth - previewWidth - sectionGap * 2
+                val boardHeight = minOf(widestBoard * 2f, maxHeight)
+                val boardWidth = boardHeight / 2f
+                val playAreaWidth = boardWidth + sideInfoWidth + previewWidth + sectionGap * 2
 
-                Box(
+                Row(
                     modifier = Modifier
-                        .width(boardWidth)
-                        .fillMaxHeight(),
-                    contentAlignment = Alignment.Center
+                        .width(playAreaWidth)
+                        .height(boardHeight),
+                    horizontalArrangement = Arrangement.spacedBy(sectionGap),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TetrisBoard(
-                        board = board,
-                        activePiece = activePiece,
-                        ghostPiece = ghostPiece,
-                        modifier = Modifier.fillMaxSize()
+                    SideInfoPanel(
+                        score = game.score,
+                        lines = game.lines,
+                        level = game.level,
+                        modifier = Modifier
+                            .width(sideInfoWidth)
+                            .fillMaxHeight()
                     )
-
-                    when {
-                        game.isGameOver -> GameOverlay(
-                            title = "游戏结束",
-                            subtitle = "本局得分 ${game.score}",
-                            buttonLabel = "再来一局",
-                            onClick = onRestart
+                    Box(
+                        modifier = Modifier
+                            .width(boardWidth)
+                            .fillMaxHeight(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        TetrisBoard(
+                            board = board,
+                            activePiece = activePiece,
+                            ghostPiece = ghostPiece,
+                            modifier = Modifier.fillMaxSize()
                         )
-                        game.isPaused -> GameOverlay(
-                            title = "已暂停",
-                            subtitle = "准备好后继续挑战",
-                            buttonLabel = "继续游戏",
-                            onClick = onPause
-                        )
+                        when {
+                            game.isGameOver -> GameOverlay(
+                                title = "游戏结束",
+                                subtitle = "本局得分 ${game.score}",
+                                buttonLabel = "再来一局",
+                                onClick = onRestart
+                            )
+                            game.isPaused -> GameOverlay(
+                                title = "已暂停",
+                                subtitle = "准备好后继续挑战",
+                                buttonLabel = "继续游戏",
+                                onClick = onPause
+                            )
+                        }
                     }
+                    UpcomingPanel(
+                        types = game.upcomingTypes,
+                        modifier = Modifier
+                            .width(previewWidth)
+                            .fillMaxHeight()
+                    )
                 }
-
-                UpcomingPanel(
-                    types = game.upcomingTypes,
-                    modifier = Modifier
-                        .width(previewWidth)
-                        .fillMaxHeight()
-                )
             }
         }
 
-        Spacer(Modifier.height(4.dp))
-        TouchControls(
-            paused = game.isPaused,
+        FreeTouchControls(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(start = 6.dp, end = 6.dp, top = 102.dp, bottom = 50.dp),
             gameOver = game.isGameOver,
+            controlSettings = controlSettings,
             onMoveLeft = onMoveLeft,
             onMoveRight = onMoveRight,
             onRotate = onRotate,
             onSoftDrop = onSoftDrop,
-            onHardDrop = onHardDrop,
-            onPause = onPause,
-            controlSettings = controlSettings
+            onHardDrop = onHardDrop
         )
+        Button(
+            onClick = onPause,
+            enabled = !game.isGameOver,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .height(36.dp),
+            shape = RoundedCornerShape(14.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp, vertical = 0.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = PanelBlueLight, contentColor = Color.White)
+        ) {
+            Text(if (game.isPaused) "▶" else "Ⅱ", style = MaterialTheme.typography.titleMedium)
+        }
     }
 }
 
@@ -704,7 +724,6 @@ private fun ControlSettingsOverlay(
     onSettingsChange: (ControlSettings) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var selectedAction by remember { mutableStateOf(ControlAction.MOVE_LEFT) }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -728,11 +747,7 @@ private fun ControlSettingsOverlay(
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 Text("控制设置", style = MaterialTheme.typography.titleLarge, color = Color.White)
-                Text(
-                    "长按速度",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = Color(0xFFBFE8FF)
-                )
+                Text("长按速度", style = MaterialTheme.typography.labelLarge, color = Color(0xFFBFE8FF))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -758,35 +773,27 @@ private fun ControlSettingsOverlay(
                     style = MaterialTheme.typography.labelLarge,
                     color = Color(0xFFD5ECFF)
                 )
-
-                Text("自定义键位", style = MaterialTheme.typography.titleMedium, color = Color.White)
+                Text("自由键位", style = MaterialTheme.typography.titleMedium, color = Color.White)
                 Text(
-                    "先选择动作，再点击目标槽位。已占用的槽位会自动交换，不会重叠。",
+                    "直接拖动按钮到控制区域任意位置。触及边界会被限制；与其他按钮的命中区重叠或间距不足时会停在上一个有效位置。",
                     style = MaterialTheme.typography.labelLarge,
                     color = Color(0xFFBFE8FF),
                     textAlign = TextAlign.Center
                 )
-                ActionSelector(
-                    selectedAction = selectedAction,
-                    onSelect = { selectedAction = it }
-                )
-                CustomSlotEditor(
+                FreeLayoutEditor(
                     layout = settings.layout,
-                    selectedAction = selectedAction,
-                    onSlotSelected = { slot ->
-                        onSettingsChange(settings.copy(layout = settings.layout.moveActionTo(selectedAction, slot)))
-                    }
+                    onLayoutChange = { next -> onSettingsChange(settings.copy(layout = next)) }
                 )
                 Button(
-                    onClick = { onSettingsChange(settings.copy(layout = CustomControlLayout.standard())) },
+                    onClick = { onSettingsChange(settings.copy(layout = FreeControlLayout.standard())) },
                     modifier = Modifier.fillMaxWidth().height(42.dp),
                     shape = RoundedCornerShape(14.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = PanelBlueLight, contentColor = Color.White)
                 ) {
-                    Text("恢复标准布局", style = MaterialTheme.typography.labelLarge)
+                    Text("恢复标准位置", style = MaterialTheme.typography.labelLarge)
                 }
                 Text(
-                    "边界：5 个固定槽位、每个动作必须存在、每个槽位只能放置一个动作。",
+                    "边界：按钮只能位于控制区域内；按钮命中区之间至少保留 8dp 间距。",
                     style = MaterialTheme.typography.labelLarge,
                     color = Color(0xFFBFE8FF),
                     textAlign = TextAlign.Center
@@ -805,137 +812,121 @@ private fun ControlSettingsOverlay(
 }
 
 @Composable
-private fun ActionSelector(
-    selectedAction: ControlAction,
-    onSelect: (ControlAction) -> Unit
+private fun FreeLayoutEditor(
+    layout: FreeControlLayout,
+    onLayoutChange: (FreeControlLayout) -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            ControlAction.entries.take(3).forEach { action ->
-                ActionSelectorButton(action, selectedAction == action, Modifier.weight(1f), onSelect)
-            }
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(330.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(PanelBlue.copy(alpha = 0.62f))
+            .border(1.dp, PanelStroke, RoundedCornerShape(18.dp))
+    ) {
+        val density = LocalDensity.current
+        val geometry = with(density) {
+            ControlAreaGeometry(
+                width = maxWidth.toPx(),
+                height = maxHeight.toPx(),
+                buttonWidth = 64.dp.toPx(),
+                buttonHeight = 58.dp.toPx(),
+                minimumGap = 8.dp.toPx()
+            )
         }
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            Spacer(Modifier.weight(0.5f))
-            ControlAction.entries.drop(3).forEach { action ->
-                ActionSelectorButton(action, selectedAction == action, Modifier.weight(1f), onSelect)
-            }
-            Spacer(Modifier.weight(0.5f))
+        ControlAction.entries.forEach { action ->
+            FreePositionedEditorButton(
+                action = action,
+                layout = layout,
+                geometry = geometry,
+                onLayoutChange = onLayoutChange
+            )
         }
     }
 }
 
 @Composable
-private fun ActionSelectorButton(
+private fun FreePositionedEditorButton(
     action: ControlAction,
-    selected: Boolean,
+    layout: FreeControlLayout,
+    geometry: ControlAreaGeometry,
+    onLayoutChange: (FreeControlLayout) -> Unit
+) {
+    val density = LocalDensity.current
+    val latestLayout by rememberUpdatedState(layout)
+    val latestOnLayoutChange by rememberUpdatedState(onLayoutChange)
+    val pixelPosition = geometry.toPixel(layout.positionOf(action))
+    val buttonWidth = with(density) { geometry.buttonWidth.toDp() }
+    val buttonHeight = with(density) { geometry.buttonHeight.toDp() }
+
+    Box(
+        modifier = Modifier
+            .offset { IntOffset(pixelPosition.x.roundToInt(), pixelPosition.y.roundToInt()) }
+            .size(buttonWidth, buttonHeight)
+            .clip(RoundedCornerShape(13.dp))
+            .background(actionColor(action))
+            .pointerInput(action, geometry) {
+                var currentPoint = PixelPoint(0f, 0f)
+                detectDragGestures(
+                    onDragStart = {
+                        currentPoint = geometry.toPixel(latestLayout.positionOf(action))
+                    },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        val candidate = geometry.clamp(
+                            PixelPoint(currentPoint.x + dragAmount.x, currentPoint.y + dragAmount.y)
+                        )
+                        val next = latestLayout.moveIfValid(action, candidate, geometry)
+                        if (next != null) {
+                            currentPoint = candidate
+                            latestOnLayoutChange(next)
+                        }
+                    }
+                )
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        Text(action.symbol, style = MaterialTheme.typography.titleLarge, color = Color.White)
+    }
+}
+
+@Composable
+private fun FreeTouchControls(
     modifier: Modifier,
-    onSelect: (ControlAction) -> Unit
-) {
-    Button(
-        onClick = { onSelect(action) },
-        modifier = modifier.height(40.dp),
-        shape = RoundedCornerShape(12.dp),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 1.dp, vertical = 0.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = if (selected) ActionGold else PanelBlueLight,
-            contentColor = Color.White
-        )
-    ) {
-        Text("${action.symbol} ${action.label}", style = MaterialTheme.typography.labelLarge)
-    }
-}
-
-@Composable
-private fun CustomSlotEditor(
-    layout: CustomControlLayout,
-    selectedAction: ControlAction,
-    onSlotSelected: (ControlSlot) -> Unit
-) {
-    val spacing = 6.dp
-    val clusterWidth = 126.dp
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(
-            modifier = Modifier.width(clusterWidth),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(spacing)
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                LayoutSlotButton(ControlSlot.LEFT_TOP_LEFT, layout, selectedAction, onSlotSelected)
-                LayoutSlotButton(ControlSlot.LEFT_TOP_RIGHT, layout, selectedAction, onSlotSelected)
-            }
-            LayoutSlotButton(ControlSlot.LEFT_BOTTOM, layout, selectedAction, onSlotSelected)
-        }
-        Column(
-            modifier = Modifier.width(clusterWidth),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(spacing)
-        ) {
-            LayoutSlotButton(ControlSlot.RIGHT_TOP, layout, selectedAction, onSlotSelected)
-            LayoutSlotButton(ControlSlot.RIGHT_BOTTOM, layout, selectedAction, onSlotSelected)
-        }
-    }
-}
-
-@Composable
-private fun LayoutSlotButton(
-    slot: ControlSlot,
-    layout: CustomControlLayout,
-    selectedAction: ControlAction,
-    onSlotSelected: (ControlSlot) -> Unit
-) {
-    val action = layout.actionAt(slot)
-    val selected = action == selectedAction
-    Button(
-        onClick = { onSlotSelected(slot) },
-        modifier = Modifier.size(width = 60.dp, height = 48.dp),
-        shape = RoundedCornerShape(13.dp),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
-        colors = ButtonDefaults.buttonColors(
-            containerColor = if (selected) ActionGold else PanelBlueLight,
-            contentColor = Color.White
-        )
-    ) {
-        Text(action.symbol, style = MaterialTheme.typography.titleLarge)
-    }
-}
-
-@Composable
-private fun TouchControls(
-    paused: Boolean,
     gameOver: Boolean,
+    controlSettings: ControlSettings,
     onMoveLeft: () -> Unit,
     onMoveRight: () -> Unit,
     onRotate: () -> Unit,
     onSoftDrop: () -> Unit,
-    onHardDrop: () -> Unit,
-    onPause: () -> Unit,
-    controlSettings: ControlSettings
+    onHardDrop: () -> Unit
 ) {
-    val enabled = !gameOver
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
-            val controlWidth = if (maxWidth >= 340.dp) 64.dp else 56.dp
-            val controlHeight = if (maxWidth >= 340.dp) 58.dp else 54.dp
-            CustomControlLayoutGrid(
-                layout = controlSettings.layout,
-                enabled = enabled,
-                buttonWidth = controlWidth,
-                buttonHeight = controlHeight,
+    BoxWithConstraints(modifier = modifier) {
+        val density = LocalDensity.current
+        val buttonWidth = if (maxWidth >= 340.dp) 64.dp else 56.dp
+        val buttonHeight = if (maxWidth >= 340.dp) 58.dp else 54.dp
+        val geometry = with(density) {
+            ControlAreaGeometry(
+                width = maxWidth.toPx(),
+                height = maxHeight.toPx(),
+                buttonWidth = buttonWidth.toPx(),
+                buttonHeight = buttonHeight.toPx(),
+                minimumGap = 8.dp.toPx()
+            )
+        }
+        val activeLayout = if (controlSettings.layout.isValidFor(geometry)) {
+            controlSettings.layout
+        } else {
+            FreeControlLayout.standard()
+        }
+        ControlAction.entries.forEach { action ->
+            FreeGameplayButton(
+                action = action,
+                layout = activeLayout,
+                geometry = geometry,
+                enabled = !gameOver,
+                buttonWidth = buttonWidth,
+                buttonHeight = buttonHeight,
                 initialDelayMillis = controlSettings.preset.initialDelayMillis,
                 repeatIntervalMillis = controlSettings.preset.repeatIntervalMillis,
                 onMoveLeft = onMoveLeft,
@@ -945,22 +936,14 @@ private fun TouchControls(
                 onHardDrop = onHardDrop
             )
         }
-        Button(
-            onClick = onPause,
-            enabled = enabled,
-            modifier = Modifier.height(36.dp),
-            shape = RoundedCornerShape(14.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp, vertical = 0.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = PanelBlueLight, contentColor = Color.White)
-        ) {
-            Text(if (paused) "▶" else "Ⅱ", style = MaterialTheme.typography.titleMedium)
-        }
     }
 }
 
 @Composable
-private fun CustomControlLayoutGrid(
-    layout: CustomControlLayout,
+private fun FreeGameplayButton(
+    action: ControlAction,
+    layout: FreeControlLayout,
+    geometry: ControlAreaGeometry,
     enabled: Boolean,
     buttonWidth: Dp,
     buttonHeight: Dp,
@@ -972,33 +955,21 @@ private fun CustomControlLayoutGrid(
     onRotate: () -> Unit,
     onHardDrop: () -> Unit
 ) {
-    val spacing = 8.dp
-    val clusterWidth = buttonWidth * 2 + spacing
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(
-            modifier = Modifier.width(clusterWidth),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(spacing)
-        ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(spacing)) {
-                ControlButtonForAction(layout.actionAt(ControlSlot.LEFT_TOP_LEFT), enabled, buttonWidth, buttonHeight, initialDelayMillis, repeatIntervalMillis, onMoveLeft, onMoveRight, onSoftDrop, onRotate, onHardDrop)
-                ControlButtonForAction(layout.actionAt(ControlSlot.LEFT_TOP_RIGHT), enabled, buttonWidth, buttonHeight, initialDelayMillis, repeatIntervalMillis, onMoveLeft, onMoveRight, onSoftDrop, onRotate, onHardDrop)
-            }
-            ControlButtonForAction(layout.actionAt(ControlSlot.LEFT_BOTTOM), enabled, buttonWidth, buttonHeight, initialDelayMillis, repeatIntervalMillis, onMoveLeft, onMoveRight, onSoftDrop, onRotate, onHardDrop)
-        }
-        Column(
-            modifier = Modifier.width(clusterWidth),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(spacing)
-        ) {
-            ControlButtonForAction(layout.actionAt(ControlSlot.RIGHT_TOP), enabled, buttonWidth, buttonHeight, initialDelayMillis, repeatIntervalMillis, onMoveLeft, onMoveRight, onSoftDrop, onRotate, onHardDrop)
-            ControlButtonForAction(layout.actionAt(ControlSlot.RIGHT_BOTTOM), enabled, buttonWidth, buttonHeight, initialDelayMillis, repeatIntervalMillis, onMoveLeft, onMoveRight, onSoftDrop, onRotate, onHardDrop)
-        }
-    }
+    val position = geometry.toPixel(layout.positionOf(action))
+    ControlButtonForAction(
+        action = action,
+        enabled = enabled,
+        buttonWidth = buttonWidth,
+        buttonHeight = buttonHeight,
+        initialDelayMillis = initialDelayMillis,
+        repeatIntervalMillis = repeatIntervalMillis,
+        onMoveLeft = onMoveLeft,
+        onMoveRight = onMoveRight,
+        onSoftDrop = onSoftDrop,
+        onRotate = onRotate,
+        onHardDrop = onHardDrop,
+        modifier = Modifier.offset { IntOffset(position.x.roundToInt(), position.y.roundToInt()) }
+    )
 }
 
 @Composable
@@ -1013,15 +984,22 @@ private fun ControlButtonForAction(
     onMoveRight: () -> Unit,
     onSoftDrop: () -> Unit,
     onRotate: () -> Unit,
-    onHardDrop: () -> Unit
+    onHardDrop: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     when (action) {
-        ControlAction.MOVE_LEFT -> ControlDisc(action.symbol, ActionBlue, enabled, buttonWidth, buttonHeight, onMoveLeft, true, initialDelayMillis, repeatIntervalMillis)
-        ControlAction.MOVE_RIGHT -> ControlDisc(action.symbol, ActionBlue, enabled, buttonWidth, buttonHeight, onMoveRight, true, initialDelayMillis, repeatIntervalMillis)
-        ControlAction.SOFT_DROP -> ControlDisc(action.symbol, ActionBlue, enabled, buttonWidth, buttonHeight, onSoftDrop, true, initialDelayMillis, repeatIntervalMillis)
-        ControlAction.ROTATE -> ControlDisc(action.symbol, ActionPurple, enabled, buttonWidth, buttonHeight, onRotate)
-        ControlAction.HARD_DROP -> ControlDisc(action.symbol, ActionGold, enabled, buttonWidth, buttonHeight, onHardDrop)
+        ControlAction.MOVE_LEFT -> ControlDisc(action.symbol, actionColor(action), enabled, buttonWidth, buttonHeight, onMoveLeft, true, initialDelayMillis, repeatIntervalMillis, modifier)
+        ControlAction.MOVE_RIGHT -> ControlDisc(action.symbol, actionColor(action), enabled, buttonWidth, buttonHeight, onMoveRight, true, initialDelayMillis, repeatIntervalMillis, modifier)
+        ControlAction.SOFT_DROP -> ControlDisc(action.symbol, actionColor(action), enabled, buttonWidth, buttonHeight, onSoftDrop, true, initialDelayMillis, repeatIntervalMillis, modifier)
+        ControlAction.ROTATE -> ControlDisc(action.symbol, actionColor(action), enabled, buttonWidth, buttonHeight, onRotate, false, modifier = modifier)
+        ControlAction.HARD_DROP -> ControlDisc(action.symbol, actionColor(action), enabled, buttonWidth, buttonHeight, onHardDrop, false, modifier = modifier)
     }
+}
+
+private fun actionColor(action: ControlAction): Color = when (action) {
+    ControlAction.MOVE_LEFT, ControlAction.MOVE_RIGHT, ControlAction.SOFT_DROP -> ActionBlue
+    ControlAction.ROTATE -> ActionPurple
+    ControlAction.HARD_DROP -> ActionGold
 }
 
 @Composable
@@ -1034,13 +1012,14 @@ private fun ControlDisc(
     onClick: () -> Unit,
     repeatOnHold: Boolean = false,
     initialDelayMillis: Long = 0L,
-    repeatIntervalMillis: Long = 0L
+    repeatIntervalMillis: Long = 0L,
+    modifier: Modifier = Modifier
 ) {
     if (!repeatOnHold) {
         Button(
             onClick = onClick,
             enabled = enabled,
-            modifier = Modifier.size(width = buttonWidth, height = buttonHeight),
+            modifier = modifier.size(width = buttonWidth, height = buttonHeight),
             shape = RoundedCornerShape(16.dp),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
             colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Color.White)
@@ -1055,7 +1034,7 @@ private fun ControlDisc(
     val repeatJobHolder = remember { arrayOfNulls<Job>(1) }
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .size(width = buttonWidth, height = buttonHeight)
             .clip(RoundedCornerShape(16.dp))
             .background(if (enabled) color else color.copy(alpha = 0.38f))

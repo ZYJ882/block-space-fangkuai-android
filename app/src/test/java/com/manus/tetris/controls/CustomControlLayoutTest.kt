@@ -1,33 +1,60 @@
 package com.manus.tetris.controls
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class CustomControlLayoutTest {
-    @Test
-    fun movingToOccupiedSlotSwapsActionsAndPreservesFiveUniqueSlots() {
-        val standard = CustomControlLayout.standard()
-        val moved = standard.moveActionTo(ControlAction.HARD_DROP, ControlSlot.LEFT_TOP_LEFT)
+    private val geometry = ControlAreaGeometry(
+        width = 360f,
+        height = 520f,
+        buttonWidth = 64f,
+        buttonHeight = 58f,
+        minimumGap = 8f
+    )
 
-        assertEquals(ControlSlot.LEFT_TOP_LEFT, moved.slotOf(ControlAction.HARD_DROP))
-        assertEquals(ControlSlot.RIGHT_BOTTOM, moved.slotOf(ControlAction.MOVE_LEFT))
-        assertEquals(ControlAction.entries.size, moved.bindings.values.toSet().size)
+    @Test
+    fun standardLayoutFitsWithinBoundsAndRespectsMinimumGap() {
+        val layout = FreeControlLayout.standard()
+
+        assertTrue(layout.isValidFor(geometry))
+        ControlAction.entries.forEach { action ->
+            val rect = geometry.rect(layout.positionOf(action))
+            assertTrue(rect.left >= 0f && rect.top >= 0f)
+            assertTrue(rect.right <= geometry.width && rect.bottom <= geometry.height)
+        }
     }
 
     @Test
-    fun decoderFallsBackWhenPersistedLayoutIsIncompleteOrOverlapping() {
-        val fallback = CustomControlLayout.standard()
-        val incomplete = CustomControlLayout.decode("MOVE_LEFT:LEFT_TOP_LEFT", fallback)
-        val overlap = CustomControlLayout.decode(
-            "MOVE_LEFT:LEFT_TOP_LEFT;MOVE_RIGHT:LEFT_TOP_LEFT;SOFT_DROP:LEFT_BOTTOM;ROTATE:RIGHT_TOP;HARD_DROP:RIGHT_BOTTOM",
-            fallback
-        )
+    fun movingIntoAnotherButtonsHitAreaIsRejected() {
+        val layout = FreeControlLayout.standard()
+        val occupiedPoint = geometry.toPixel(layout.positionOf(ControlAction.MOVE_RIGHT))
 
-        assertEquals(fallback, incomplete)
-        assertEquals(fallback, overlap)
-        assertTrue(fallback.bindings.values.toSet().size == ControlAction.entries.size)
-        assertNotEquals(ControlSlot.LEFT_TOP_LEFT, fallback.slotOf(ControlAction.HARD_DROP))
+        val result = layout.moveIfValid(ControlAction.MOVE_LEFT, occupiedPoint, geometry)
+
+        assertNull(result)
+    }
+
+    @Test
+    fun draggingBeyondBoundaryIsClampedToSafeRegion() {
+        val layout = FreeControlLayout.standard()
+        val moved = layout.moveIfValid(ControlAction.HARD_DROP, PixelPoint(9999f, 9999f), geometry)
+
+        assertNotNull(moved)
+        val rect = geometry.rect(moved!!.positionOf(ControlAction.HARD_DROP))
+        assertEquals(geometry.width, rect.right, 0.001f)
+        assertEquals(geometry.height, rect.bottom, 0.001f)
+    }
+
+    @Test
+    fun incompleteSavedLayoutFallsBackToStandardLayout() {
+        val fallback = FreeControlLayout.standard()
+        val decoded = FreeControlLayout.decode("MOVE_LEFT:0.2,0.5", fallback)
+
+        assertEquals(fallback, decoded)
+        assertFalse(decoded.positions.isEmpty())
     }
 }

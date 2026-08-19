@@ -1,6 +1,8 @@
 package com.manus.tetris.controls
 
 import android.content.Context
+import kotlin.math.max
+import kotlin.math.min
 
 enum class HandlingPreset(
     val label: String,
@@ -30,74 +32,136 @@ enum class ControlAction(val label: String, val symbol: String) {
     }
 }
 
-/** 五个固定视觉槽位；每个槽位的尺寸、间距和命中区域由界面统一控制。 */
-enum class ControlSlot(val label: String) {
-    LEFT_TOP_LEFT("左上左"),
-    LEFT_TOP_RIGHT("左上右"),
-    LEFT_BOTTOM("左下"),
-    RIGHT_TOP("右上"),
-    RIGHT_BOTTOM("右下")
+/** 相对位置以控制区域内按键左上角的可用移动范围为基准，取值始终在 0–1。 */
+data class RelativeControlPosition(val x: Float, val y: Float) {
+    init {
+        require(x in 0f..1f && y in 0f..1f) { "相对位置必须位于 0 到 1 之间" }
+    }
+}
+
+data class PixelPoint(val x: Float, val y: Float)
+
+data class PixelRect(val left: Float, val top: Float, val width: Float, val height: Float) {
+    val right: Float get() = left + width
+    val bottom: Float get() = top + height
 }
 
 /**
- * 一个始终完整、无重叠的按键布局。
- * moveActionTo 以“交换槽位”而不是覆盖方式更新，因此五个动作永远各占一个唯一位置。
+ * 运行时几何参数。所有坐标均为像素，minimumGap 为两个按钮命中区之间保留的最小间距。
  */
-data class CustomControlLayout(val bindings: Map<ControlAction, ControlSlot>) {
+data class ControlAreaGeometry(
+    val width: Float,
+    val height: Float,
+    val buttonWidth: Float,
+    val buttonHeight: Float,
+    val minimumGap: Float
+) {
     init {
-        require(bindings.keys.containsAll(ControlAction.entries)) { "每个操作都必须分配一个槽位" }
-        require(bindings.values.toSet().size == ControlAction.entries.size) { "按键槽位不能重叠" }
+        require(width >= buttonWidth && height >= buttonHeight) { "控制区域必须容纳一个完整按钮" }
     }
 
-    fun slotOf(action: ControlAction): ControlSlot = bindings.getValue(action)
+    private val movableWidth: Float get() = width - buttonWidth
+    private val movableHeight: Float get() = height - buttonHeight
 
-    fun actionAt(slot: ControlSlot): ControlAction =
-        bindings.entries.first { it.value == slot }.key
+    fun toPixel(position: RelativeControlPosition): PixelPoint = PixelPoint(
+        x = position.x * movableWidth,
+        y = position.y * movableHeight
+    )
 
-    fun moveActionTo(action: ControlAction, target: ControlSlot): CustomControlLayout {
-        val source = slotOf(action)
-        if (source == target) return this
-        val displaced = actionAt(target)
-        return CustomControlLayout(
-            bindings.toMutableMap().apply {
-                this[action] = target
-                this[displaced] = source
+    fun toRelative(point: PixelPoint): RelativeControlPosition = RelativeControlPosition(
+        x = if (movableWidth == 0f) 0f else (point.x / movableWidth).coerceIn(0f, 1f),
+        y = if (movableHeight == 0f) 0f else (point.y / movableHeight).coerceIn(0f, 1f)
+    )
+
+    fun clamp(point: PixelPoint): PixelPoint = PixelPoint(
+        x = min(max(point.x, 0f), movableWidth),
+        y = min(max(point.y, 0f), movableHeight)
+    )
+
+    fun rect(position: RelativeControlPosition): PixelRect {
+        val point = toPixel(position)
+        return PixelRect(point.x, point.y, buttonWidth, buttonHeight)
+    }
+
+    fun intersectsWithGap(first: PixelRect, second: PixelRect): Boolean =
+        first.left < second.right + minimumGap &&
+            first.right + minimumGap > second.left &&
+            first.top < second.bottom + minimumGap &&
+            first.bottom + minimumGap > second.top
+}
+
+/**
+ * 五个动作可以在底部控制区域中自由摆放。位置以相对值持久化，因此不同屏幕宽度会按比例适配。
+ * moveIfValid 会先夹紧边界，再检测与其他四个按钮的最小间距；无效拖拽返回 null，界面保持上一次有效位置。
+ */
+data class FreeControlLayout(val positions: Map<ControlAction, RelativeControlPosition>) {
+    init {
+        require(positions.keys.containsAll(ControlAction.entries)) { "每个操作都必须具有位置" }
+    }
+
+    fun positionOf(action: ControlAction): RelativeControlPosition = positions.getValue(action)
+
+    fun isValidFor(geometry: ControlAreaGeometry): Boolean {
+        val actions = ControlAction.entries
+        return actions.indices.none { firstIndex ->
+            val first = actions[firstIndex]
+            actions.drop(firstIndex + 1).any { second ->
+                geometry.intersectsWithGap(geometry.rect(positionOf(first)), geometry.rect(positionOf(second)))
             }
-        )
+        }
+    }
+
+    fun moveIfValid(
+        action: ControlAction,
+        desiredTopLeft: PixelPoint,
+        geometry: ControlAreaGeometry
+    ): FreeControlLayout? {
+        val candidate = geometry.toRelative(geometry.clamp(desiredTopLeft))
+        val candidateRect = geometry.rect(candidate)
+        val collides = ControlAction.entries
+            .filter { it != action }
+            .any { other -> geometry.intersectsWithGap(candidateRect, geometry.rect(positionOf(other))) }
+        if (collides) return null
+        return copy(positions = positions.toMutableMap().apply { this[action] = candidate })
     }
 
     fun encode(): String = ControlAction.entries.joinToString(";") { action ->
-        "${action.name}:${slotOf(action).name}"
+        val position = positionOf(action)
+        "${action.name}:${position.x},${position.y}"
     }
 
     companion object {
-        fun standard(): CustomControlLayout = CustomControlLayout(
+        fun standard(): FreeControlLayout = FreeControlLayout(
             mapOf(
-                ControlAction.MOVE_LEFT to ControlSlot.LEFT_TOP_LEFT,
-                ControlAction.MOVE_RIGHT to ControlSlot.LEFT_TOP_RIGHT,
-                ControlAction.SOFT_DROP to ControlSlot.LEFT_BOTTOM,
-                ControlAction.ROTATE to ControlSlot.RIGHT_TOP,
-                ControlAction.HARD_DROP to ControlSlot.RIGHT_BOTTOM
+                ControlAction.MOVE_LEFT to RelativeControlPosition(0f, 0.74f),
+                ControlAction.MOVE_RIGHT to RelativeControlPosition(0.30f, 0.74f),
+                ControlAction.SOFT_DROP to RelativeControlPosition(0.15f, 1f),
+                ControlAction.ROTATE to RelativeControlPosition(1f, 0.74f),
+                ControlAction.HARD_DROP to RelativeControlPosition(1f, 1f)
             )
         )
 
-        fun decode(value: String?, fallback: CustomControlLayout): CustomControlLayout {
+        fun decode(value: String?, fallback: FreeControlLayout): FreeControlLayout {
             if (value.isNullOrBlank()) return fallback
             val parsed = value.split(';').mapNotNull { entry ->
-                val pair = entry.split(':', limit = 2)
-                if (pair.size != 2) return@mapNotNull null
-                val action = ControlAction.entries.firstOrNull { it.name == pair[0] } ?: return@mapNotNull null
-                val slot = ControlSlot.entries.firstOrNull { it.name == pair[1] } ?: return@mapNotNull null
-                action to slot
+                val actionAndPoint = entry.split(':', limit = 2)
+                if (actionAndPoint.size != 2) return@mapNotNull null
+                val action = ControlAction.entries.firstOrNull { it.name == actionAndPoint[0] } ?: return@mapNotNull null
+                val point = actionAndPoint[1].split(',', limit = 2)
+                if (point.size != 2) return@mapNotNull null
+                val x = point[0].toFloatOrNull() ?: return@mapNotNull null
+                val y = point[1].toFloatOrNull() ?: return@mapNotNull null
+                if (x !in 0f..1f || y !in 0f..1f) return@mapNotNull null
+                action to RelativeControlPosition(x, y)
             }.toMap()
-            return runCatching { CustomControlLayout(parsed) }.getOrElse { fallback }
+            return runCatching { FreeControlLayout(parsed) }.getOrElse { fallback }
         }
     }
 }
 
 data class ControlSettings(
     val preset: HandlingPreset = HandlingPreset.COMFORT,
-    val layout: CustomControlLayout = CustomControlLayout.standard()
+    val layout: FreeControlLayout = FreeControlLayout.standard()
 )
 
 class ControlSettingsStore(context: Context) {
@@ -106,13 +170,13 @@ class ControlSettingsStore(context: Context) {
         Context.MODE_PRIVATE
     )
 
-    fun load(): ControlSettings {
-        val fallback = CustomControlLayout.standard()
-        return ControlSettings(
-            preset = HandlingPreset.fromName(preferences.getString(KEY_PRESET, null)),
-            layout = CustomControlLayout.decode(preferences.getString(KEY_LAYOUT, null), fallback)
+    fun load(): ControlSettings = ControlSettings(
+        preset = HandlingPreset.fromName(preferences.getString(KEY_PRESET, null)),
+        layout = FreeControlLayout.decode(
+            preferences.getString(KEY_LAYOUT, null),
+            FreeControlLayout.standard()
         )
-    }
+    )
 
     fun save(settings: ControlSettings) {
         preferences.edit()
@@ -123,6 +187,6 @@ class ControlSettingsStore(context: Context) {
 
     private companion object {
         const val KEY_PRESET = "handling_preset"
-        const val KEY_LAYOUT = "custom_layout"
+        const val KEY_LAYOUT = "free_layout"
     }
 }
