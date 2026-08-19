@@ -51,6 +51,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -670,28 +671,31 @@ private fun TouchControls(
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(3.dp)
+        verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            ControlDisc("←", ActionBlue, enabled, onMoveLeft, repeatOnHold = true)
-            ControlDisc("→", ActionBlue, enabled, onMoveRight, repeatOnHold = true)
-            ControlDisc("↓", ActionBlue, enabled, onSoftDrop, repeatOnHold = true)
-            ControlDisc("⇊", ActionGold, enabled, onHardDrop)
-            ControlDisc("↻", ActionPurple, enabled, onRotate)
+        BoxWithConstraints(modifier = Modifier.fillMaxWidth()) {
+            val controlDiameter = if (maxWidth >= 340.dp) 64.dp else 56.dp
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ControlDisc("←", ActionBlue, enabled, controlDiameter, onMoveLeft, repeatOnHold = true)
+                ControlDisc("→", ActionBlue, enabled, controlDiameter, onMoveRight, repeatOnHold = true)
+                ControlDisc("↓", ActionBlue, enabled, controlDiameter, onSoftDrop, repeatOnHold = true)
+                ControlDisc("⇊", ActionGold, enabled, controlDiameter, onHardDrop)
+                ControlDisc("↻", ActionPurple, enabled, controlDiameter, onRotate)
+            }
         }
         Button(
             onClick = onPause,
             enabled = enabled,
-            modifier = Modifier.height(30.dp),
-            shape = RoundedCornerShape(12.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+            modifier = Modifier.height(36.dp),
+            shape = RoundedCornerShape(14.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp, vertical = 0.dp),
             colors = ButtonDefaults.buttonColors(containerColor = PanelBlueLight, contentColor = Color.White)
         ) {
-            Text(if (paused) "▶" else "Ⅱ", style = MaterialTheme.typography.labelLarge)
+            Text(if (paused) "▶" else "Ⅱ", style = MaterialTheme.typography.titleMedium)
         }
     }
 }
@@ -701,6 +705,7 @@ private fun ControlDisc(
     symbol: String,
     color: Color,
     enabled: Boolean,
+    diameter: Dp,
     onClick: () -> Unit,
     repeatOnHold: Boolean = false
 ) {
@@ -708,7 +713,7 @@ private fun ControlDisc(
         Button(
             onClick = onClick,
             enabled = enabled,
-            modifier = Modifier.size(48.dp),
+            modifier = Modifier.size(diameter),
             shape = CircleShape,
             contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
             colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Color.White)
@@ -724,7 +729,7 @@ private fun ControlDisc(
 
     Box(
         modifier = Modifier
-            .size(48.dp)
+            .size(diameter)
             .clip(CircleShape)
             .background(if (enabled) color else color.copy(alpha = 0.38f))
             .pointerInput(enabled) {
