@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -35,12 +36,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -48,6 +52,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import com.manus.tetris.game.FallingPiece
 import com.manus.tetris.game.PieceLibrary
 import com.manus.tetris.game.TetrisGame
@@ -636,9 +642,9 @@ private fun TouchControls(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            ControlDisc("←", ActionBlue, enabled, onMoveLeft)
-            ControlDisc("→", ActionBlue, enabled, onMoveRight)
-            ControlDisc("↓", ActionBlue, enabled, onSoftDrop)
+            ControlDisc("←", ActionBlue, enabled, onMoveLeft, repeatOnHold = true)
+            ControlDisc("→", ActionBlue, enabled, onMoveRight, repeatOnHold = true)
+            ControlDisc("↓", ActionBlue, enabled, onSoftDrop, repeatOnHold = true)
             ControlDisc("⇊", ActionGold, enabled, onHardDrop)
             ControlDisc("↻", ActionPurple, enabled, onRotate)
         }
@@ -660,16 +666,55 @@ private fun ControlDisc(
     symbol: String,
     color: Color,
     enabled: Boolean,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    repeatOnHold: Boolean = false
 ) {
-    Button(
-        onClick = onClick,
-        enabled = enabled,
-        modifier = Modifier.size(48.dp),
-        shape = CircleShape,
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Color.White)
+    if (!repeatOnHold) {
+        Button(
+            onClick = onClick,
+            enabled = enabled,
+            modifier = Modifier.size(48.dp),
+            shape = CircleShape,
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = color, contentColor = Color.White)
+        ) {
+            Text(symbol, style = MaterialTheme.typography.titleLarge)
+        }
+        return
+    }
+
+    val latestAction by rememberUpdatedState(onClick)
+    val scope = rememberCoroutineScope()
+    val repeatJobHolder = remember { arrayOfNulls<Job>(1) }
+
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(if (enabled) color else color.copy(alpha = 0.38f))
+            .pointerInput(enabled) {
+                if (!enabled) return@pointerInput
+                detectTapGestures(
+                    onPress = {
+                        latestAction()
+                        repeatJobHolder[0] = scope.launch {
+                            delay(260)
+                            while (true) {
+                                latestAction()
+                                delay(72)
+                            }
+                        }
+                        try {
+                            tryAwaitRelease()
+                        } finally {
+                            repeatJobHolder[0]?.cancel()
+                            repeatJobHolder[0] = null
+                        }
+                    }
+                )
+            },
+        contentAlignment = Alignment.Center
     ) {
-        Text(symbol, style = MaterialTheme.typography.titleLarge)
+        Text(symbol, style = MaterialTheme.typography.titleLarge, color = Color.White)
     }
 }
