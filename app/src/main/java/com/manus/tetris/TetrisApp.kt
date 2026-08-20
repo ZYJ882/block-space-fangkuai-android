@@ -1,5 +1,11 @@
 package com.manus.tetris
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.animateIntAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -48,6 +54,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -78,6 +85,7 @@ import com.manus.tetris.game.TetrisGame
 import com.manus.tetris.game.TetrominoType
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 private val ArenaTop = Color(0xFF0A5BBC)
@@ -157,7 +165,11 @@ fun TetrisApp() {
                 onMoveRight = { updateGame { game.moveRight() } },
                 onRotate = { updateGame { game.rotateClockwise() } },
                 onSoftDrop = { updateGame { game.softDrop() } },
-                onHardDrop = { updateGame { game.hardDrop() } },
+                onHardDrop = {
+                    var dropped = false
+                    updateGame { dropped = game.hardDrop() }
+                    dropped
+                },
                 onPause = { updateGame { game.togglePause() } },
                 onRestart = { updateGame { game.startNewGame() } },
                 controlSettings = controlSettings,
@@ -249,7 +261,7 @@ private fun GameScreen(
     onMoveRight: () -> Unit,
     onRotate: () -> Unit,
     onSoftDrop: () -> Unit,
-    onHardDrop: () -> Unit,
+    onHardDrop: () -> Boolean,
     onPause: () -> Unit,
     onRestart: () -> Unit,
     controlSettings: ControlSettings,
@@ -264,6 +276,7 @@ private fun GameScreen(
     val activePiece = game.activePiece
     val ghostPiece = game.ghostPiece()
     val scoreEvent = game.lastScoreEvent
+    var hardDropAnimationRevision by remember { mutableIntStateOf(0) }
 
     Box(
         modifier = Modifier
@@ -334,6 +347,10 @@ private fun GameScreen(
                             board = board,
                             activePiece = activePiece,
                             ghostPiece = ghostPiece,
+                            lockRevision = game.lockRevision,
+                            clearRevision = game.clearRevision,
+                            clearedRows = game.lastClearedRows,
+                            hardDropRevision = hardDropAnimationRevision,
                             modifier = Modifier.fillMaxSize()
                         )
                         when {
@@ -375,7 +392,9 @@ private fun GameScreen(
             onMoveRight = onMoveRight,
             onRotate = onRotate,
             onSoftDrop = onSoftDrop,
-            onHardDrop = onHardDrop
+            onHardDrop = {
+                if (onHardDrop()) hardDropAnimationRevision++
+            }
         )
         if (isEditingControls) {
             FullScreenControlEditorToolbar(
@@ -678,13 +697,39 @@ private fun ScoreBanner(
     b2bReady: Boolean,
     fallSpeed: FallSpeedPreset
 ) {
+    val displayedScore by animateIntAsState(
+        targetValue = score,
+        animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+        label = "scoreCounter"
+    )
+    var showScoreEvent by remember { mutableStateOf(false) }
+    LaunchedEffect(eventTitle, eventPoints, score) {
+        if (eventTitle == null) {
+            showScoreEvent = false
+            return@LaunchedEffect
+        }
+        showScoreEvent = true
+        delay(950)
+        showScoreEvent = false
+    }
+    val eventAlpha by animateFloatAsState(
+        targetValue = if (showScoreEvent) 1f else 0f,
+        animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing),
+        label = "scoreEventAlpha"
+    )
+    val eventScale by animateFloatAsState(
+        targetValue = if (showScoreEvent) 1f else 0.88f,
+        animationSpec = spring(dampingRatio = 0.72f, stiffness = 420f),
+        label = "scoreEventScale"
+    )
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(1.dp)
     ) {
         Text("当前得分", style = MaterialTheme.typography.labelLarge, color = Color(0xFFBCE6FF))
         Text(
-            score.toString(),
+            displayedScore.toString(),
             style = MaterialTheme.typography.titleLarge,
             color = Color.White
         )
@@ -694,8 +739,13 @@ private fun ScoreBanner(
             color = Color(0xFFBCE6FF)
         )
         when {
-            eventTitle != null -> Text(
+            eventTitle != null && eventAlpha > 0.01f -> Text(
                 "$eventTitle  +$eventPoints",
+                modifier = Modifier.graphicsLayer {
+                    alpha = eventAlpha
+                    scaleX = eventScale
+                    scaleY = eventScale
+                },
                 style = MaterialTheme.typography.labelLarge,
                 color = ActionGold
             )
@@ -824,8 +874,63 @@ private fun TetrisBoard(
     board: Array<IntArray>,
     activePiece: FallingPiece?,
     ghostPiece: FallingPiece?,
+    lockRevision: Int,
+    clearRevision: Int,
+    clearedRows: List<Int>,
+    hardDropRevision: Int,
     modifier: Modifier = Modifier
 ) {
+    val visualRow = remember { Animatable(activePiece?.row?.toFloat() ?: 0f) }
+    val visualColumn = remember { Animatable(activePiece?.column?.toFloat() ?: 0f) }
+    var previousPiece by remember { mutableStateOf(activePiece) }
+    val lockPulse = remember { Animatable(0f) }
+    val clearFlash = remember { Animatable(0f) }
+    val hardDropFlash = remember { Animatable(0f) }
+
+    LaunchedEffect(activePiece) {
+        val target = activePiece
+        if (target == null) return@LaunchedEffect
+        val previous = previousPiece
+        val shouldSnap = previous == null ||
+            previous.type != target.type ||
+            target.row < previous.row ||
+            abs(target.row - previous.row) > 1
+        if (shouldSnap) {
+            visualRow.snapTo(target.row.toFloat())
+            visualColumn.snapTo(target.column.toFloat())
+        } else {
+            launch {
+                visualRow.animateTo(
+                    target.row.toFloat(),
+                    animationSpec = tween(durationMillis = 72, easing = FastOutSlowInEasing)
+                )
+            }
+            launch {
+                visualColumn.animateTo(
+                    target.column.toFloat(),
+                    animationSpec = tween(durationMillis = 64, easing = FastOutSlowInEasing)
+                )
+            }
+        }
+        previousPiece = target
+    }
+
+    LaunchedEffect(lockRevision) {
+        if (lockRevision == 0) return@LaunchedEffect
+        lockPulse.snapTo(1f)
+        lockPulse.animateTo(0f, animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing))
+    }
+    LaunchedEffect(clearRevision) {
+        if (clearRevision == 0) return@LaunchedEffect
+        clearFlash.snapTo(1f)
+        clearFlash.animateTo(0f, animationSpec = tween(durationMillis = 190, easing = FastOutSlowInEasing))
+    }
+    LaunchedEffect(hardDropRevision) {
+        if (hardDropRevision == 0) return@LaunchedEffect
+        hardDropFlash.snapTo(1f)
+        hardDropFlash.animateTo(0f, animationSpec = tween(durationMillis = 95, easing = FastOutSlowInEasing))
+    }
+
     Canvas(
         modifier = modifier
             .clip(RoundedCornerShape(16.dp))
@@ -883,11 +988,41 @@ private fun TetrisBoard(
 
         activePiece?.blocks()?.forEach { block ->
             if (block.row in 0 until TetrisGame.ROWS && block.column in 0 until TetrisGame.COLUMNS) {
+                val offsetRow = visualRow.value - activePiece.row
+                val offsetColumn = visualColumn.value - activePiece.column
                 drawBlock(
                     color = Color(activePiece.type.color),
-                    left = block.column * cell,
-                    top = block.row * cell,
+                    left = (block.column + offsetColumn) * cell,
+                    top = (block.row + offsetRow) * cell,
                     side = cell
+                )
+            }
+        }
+
+        if (hardDropFlash.value > 0f) {
+            drawRect(ActionGold.copy(alpha = hardDropFlash.value * 0.14f))
+        }
+        if (lockPulse.value > 0f) {
+            drawRoundRect(
+                color = Color.White.copy(alpha = lockPulse.value * 0.16f),
+                topLeft = Offset(cell * 0.18f, cell * 0.18f),
+                size = Size(size.width - cell * 0.36f, size.height - cell * 0.36f),
+                cornerRadius = CornerRadius(cell * 0.35f),
+                style = Stroke(width = cell * (0.08f + lockPulse.value * 0.04f))
+            )
+        }
+        if (clearFlash.value > 0f) {
+            clearedRows.forEach { row ->
+                drawRect(
+                    color = Color.White.copy(alpha = clearFlash.value * 0.58f),
+                    topLeft = Offset(0f, row * cell),
+                    size = Size(size.width, cell)
+                )
+                drawLine(
+                    color = ActionGold.copy(alpha = clearFlash.value * 0.9f),
+                    start = Offset(0f, row * cell + cell / 2f),
+                    end = Offset(size.width, row * cell + cell / 2f),
+                    strokeWidth = cell * 0.08f
                 )
             }
         }

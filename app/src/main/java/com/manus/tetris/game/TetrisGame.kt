@@ -198,6 +198,14 @@ class TetrisGame(private val random: Random = Random.Default) {
         private set
     var lastScoreEvent: ScoreEvent? = null
         private set
+    var lockRevision: Int = 0
+        private set
+    var clearRevision: Int = 0
+        private set
+    var lastClearedLines: Int = 0
+        private set
+    var lastClearedRows: List<Int> = emptyList()
+        private set
     var fallSpeedPreset: FallSpeedPreset = FallSpeedPreset.STANDARD
         private set
 
@@ -230,6 +238,10 @@ class TetrisGame(private val random: Random = Random.Default) {
         consecutiveClears = 0
         isBackToBack = false
         lastScoreEvent = null
+        lockRevision = 0
+        clearRevision = 0
+        lastClearedLines = 0
+        lastClearedRows = emptyList()
         lastActionWasRotation = false
         resetPieceTiming()
         isPaused = false
@@ -283,8 +295,8 @@ class TetrisGame(private val random: Random = Random.Default) {
         }
     }
 
-    fun hardDrop() {
-        if (!canControl() || !InputSafetyRules.canHardDrop(hardDropGuardMillis)) return
+    fun hardDrop(): Boolean {
+        if (!canControl() || !InputSafetyRules.canHardDrop(hardDropGuardMillis)) return false
         var distance = 0
         while (canPlace(active!!.moved(rowDelta = 1))) {
             active = active!!.moved(rowDelta = 1)
@@ -293,6 +305,7 @@ class TetrisGame(private val random: Random = Random.Default) {
         if (distance > 0) lastActionWasRotation = false
         score += distance * 2
         lockPiece()
+        return true
     }
 
     /**
@@ -356,20 +369,25 @@ class TetrisGame(private val random: Random = Random.Default) {
             }
         }
 
-        val cleared = clearCompletedRows()
+        val clearedRows = clearCompletedRows()
+        val cleared = clearedRows.size
         val perfectClear = cleared > 0 && cells.all { row -> row.all { it == EMPTY } }
+        lastClearedLines = cleared
+        lastClearedRows = clearedRows
+        lockRevision++
+        if (cleared > 0) clearRevision++
         applyScoring(cleared, tSpin, perfectClear)
         lastActionWasRotation = false
         resetPieceTiming()
         spawnPiece(guardHardDrop = true)
     }
 
-    private fun clearCompletedRows(): Int {
-        var cleared = 0
+    private fun clearCompletedRows(): List<Int> {
+        val clearedRows = mutableListOf<Int>()
         var writeRow = ROWS - 1
         for (readRow in ROWS - 1 downTo 0) {
             if (cells[readRow].all { it != EMPTY }) {
-                cleared++
+                clearedRows += readRow
             } else {
                 if (writeRow != readRow) cells[readRow].copyInto(cells[writeRow])
                 writeRow--
@@ -379,7 +397,7 @@ class TetrisGame(private val random: Random = Random.Default) {
             cells[writeRow].fill(EMPTY)
             writeRow--
         }
-        return cleared
+        return clearedRows
     }
 
     private fun applyScoring(cleared: Int, tSpin: Boolean, perfectClear: Boolean) {

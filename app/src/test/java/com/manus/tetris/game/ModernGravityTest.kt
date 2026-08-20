@@ -74,6 +74,18 @@ class ModernGravityTest {
     }
 
     @Test
+    fun lockingEmitsVisualEventDataWithoutChangingBoardRules() {
+        val game = TetrisGame(Random(29))
+
+        assertTrue(game.hardDrop())
+
+        assertEquals(1, game.lockRevision)
+        assertEquals(0, game.clearRevision)
+        assertEquals(0, game.lastClearedLines)
+        assertTrue(game.lastClearedRows.isEmpty())
+    }
+
+    @Test
     fun speedPresetChangesGravityAndChallengeScoresButNotDropPoints() {
         val game = TetrisGame(Random(23))
         val baseGravity = game.gravityCellsPerSecond
