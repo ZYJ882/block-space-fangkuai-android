@@ -165,11 +165,7 @@ fun TetrisApp() {
                 onMoveRight = { updateGame { game.moveRight() } },
                 onRotate = { updateGame { game.rotateClockwise() } },
                 onSoftDrop = { updateGame { game.softDrop() } },
-                onHardDrop = {
-                    var dropped = false
-                    updateGame { dropped = game.hardDrop() }
-                    dropped
-                },
+                onHardDrop = { updateGame { game.hardDrop() } },
                 onPause = { updateGame { game.togglePause() } },
                 onRestart = { updateGame { game.startNewGame() } },
                 controlSettings = controlSettings,
@@ -261,7 +257,7 @@ private fun GameScreen(
     onMoveRight: () -> Unit,
     onRotate: () -> Unit,
     onSoftDrop: () -> Unit,
-    onHardDrop: () -> Boolean,
+    onHardDrop: () -> Unit,
     onPause: () -> Unit,
     onRestart: () -> Unit,
     controlSettings: ControlSettings,
@@ -276,7 +272,6 @@ private fun GameScreen(
     val activePiece = game.activePiece
     val ghostPiece = game.ghostPiece()
     val scoreEvent = game.lastScoreEvent
-    var hardDropAnimationRevision by remember { mutableIntStateOf(0) }
 
     Box(
         modifier = Modifier
@@ -347,10 +342,8 @@ private fun GameScreen(
                             board = board,
                             activePiece = activePiece,
                             ghostPiece = ghostPiece,
-                            lockRevision = game.lockRevision,
                             clearRevision = game.clearRevision,
                             clearedRows = game.lastClearedRows,
-                            hardDropRevision = hardDropAnimationRevision,
                             modifier = Modifier.fillMaxSize()
                         )
                         when {
@@ -392,9 +385,7 @@ private fun GameScreen(
             onMoveRight = onMoveRight,
             onRotate = onRotate,
             onSoftDrop = onSoftDrop,
-            onHardDrop = {
-                if (onHardDrop()) hardDropAnimationRevision++
-            }
+            onHardDrop = onHardDrop
         )
         if (isEditingControls) {
             FullScreenControlEditorToolbar(
@@ -874,18 +865,14 @@ private fun TetrisBoard(
     board: Array<IntArray>,
     activePiece: FallingPiece?,
     ghostPiece: FallingPiece?,
-    lockRevision: Int,
     clearRevision: Int,
     clearedRows: List<Int>,
-    hardDropRevision: Int,
     modifier: Modifier = Modifier
 ) {
     val visualRow = remember { Animatable(activePiece?.row?.toFloat() ?: 0f) }
     val visualColumn = remember { Animatable(activePiece?.column?.toFloat() ?: 0f) }
     var previousPiece by remember { mutableStateOf(activePiece) }
-    val lockPulse = remember { Animatable(0f) }
     val clearFlash = remember { Animatable(0f) }
-    val hardDropFlash = remember { Animatable(0f) }
 
     LaunchedEffect(activePiece) {
         val target = activePiece
@@ -915,22 +902,11 @@ private fun TetrisBoard(
         previousPiece = target
     }
 
-    LaunchedEffect(lockRevision) {
-        if (lockRevision == 0) return@LaunchedEffect
-        lockPulse.snapTo(1f)
-        lockPulse.animateTo(0f, animationSpec = tween(durationMillis = 90, easing = FastOutSlowInEasing))
-    }
     LaunchedEffect(clearRevision) {
         if (clearRevision == 0) return@LaunchedEffect
         clearFlash.snapTo(1f)
         clearFlash.animateTo(0f, animationSpec = tween(durationMillis = 190, easing = FastOutSlowInEasing))
     }
-    LaunchedEffect(hardDropRevision) {
-        if (hardDropRevision == 0) return@LaunchedEffect
-        hardDropFlash.snapTo(1f)
-        hardDropFlash.animateTo(0f, animationSpec = tween(durationMillis = 95, easing = FastOutSlowInEasing))
-    }
-
     Canvas(
         modifier = modifier
             .clip(RoundedCornerShape(16.dp))
@@ -999,31 +975,18 @@ private fun TetrisBoard(
             }
         }
 
-        if (hardDropFlash.value > 0f) {
-            drawRect(ActionGold.copy(alpha = hardDropFlash.value * 0.14f))
-        }
-        if (lockPulse.value > 0f) {
-            // 仅用细微蓝色边缘确认落地，避免白色大面积闪烁干扰棋盘可读性。
-            drawRoundRect(
-                color = PanelStroke.copy(alpha = lockPulse.value * 0.32f),
-                topLeft = Offset(cell * 0.12f, cell * 0.12f),
-                size = Size(size.width - cell * 0.24f, size.height - cell * 0.24f),
-                cornerRadius = CornerRadius(cell * 0.26f),
-                style = Stroke(width = maxOf(1.5f, cell * 0.028f))
-            )
-        }
         if (clearFlash.value > 0f) {
             clearedRows.forEach { row ->
                 drawRect(
-                    color = Color.White.copy(alpha = clearFlash.value * 0.58f),
+                    color = Color.White.copy(alpha = clearFlash.value * 0.20f),
                     topLeft = Offset(0f, row * cell),
                     size = Size(size.width, cell)
                 )
                 drawLine(
-                    color = ActionGold.copy(alpha = clearFlash.value * 0.9f),
+                    color = ActionGold.copy(alpha = clearFlash.value * 0.46f),
                     start = Offset(0f, row * cell + cell / 2f),
                     end = Offset(size.width, row * cell + cell / 2f),
-                    strokeWidth = cell * 0.08f
+                    strokeWidth = cell * 0.045f
                 )
             }
         }
