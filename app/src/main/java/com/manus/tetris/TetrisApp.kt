@@ -394,17 +394,14 @@ private fun FullScreenControlEditorToolbar(
     ) {
         Column(
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalArrangement = Arrangement.spacedBy(7.dp)
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column {
-                    Text("键位编辑", style = MaterialTheme.typography.titleMedium, color = Color.White)
-                    Text("直接拖动下方真实按键", style = MaterialTheme.typography.labelLarge, color = Color(0xFFBFE8FF))
-                }
+                Text("键位编辑", style = MaterialTheme.typography.titleMedium, color = Color.White)
                 Button(
                     onClick = onDone,
                     modifier = Modifier.height(38.dp),
@@ -415,32 +412,52 @@ private fun FullScreenControlEditorToolbar(
                     Text("完成", style = MaterialTheme.typography.labelLarge)
                 }
             }
+
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("① 长按灵敏度", style = MaterialTheme.typography.labelLarge, color = Color(0xFFBFE8FF))
+                Text(
+                    "只影响左移、右移、软降的连续触发速度；不会改变按键位置。",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color(0xFFD5ECFF)
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    HandlingPreset.entries.forEach { preset ->
+                        Button(
+                            onClick = { onSettingsChange(settings.copy(preset = preset)) },
+                            modifier = Modifier.weight(1f).height(36.dp),
+                            shape = RoundedCornerShape(11.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 1.dp, vertical = 0.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (settings.preset == preset) ActionPurple else PanelBlueLight,
+                                contentColor = Color.White
+                            )
+                        ) {
+                            Text(preset.label, style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                HandlingPreset.entries.forEach { preset ->
-                    Button(
-                        onClick = { onSettingsChange(settings.copy(preset = preset)) },
-                        modifier = Modifier.weight(1f).height(36.dp),
-                        shape = RoundedCornerShape(11.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 1.dp, vertical = 0.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (settings.preset == preset) ActionPurple else PanelBlueLight,
-                            contentColor = Color.White
-                        )
-                    ) {
-                        Text(preset.label, style = MaterialTheme.typography.labelLarge)
-                    }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("② 键位位置", style = MaterialTheme.typography.labelLarge, color = Color(0xFFBFE8FF))
+                    Text("直接拖动下方真实按键即可调整位置。", style = MaterialTheme.typography.labelLarge, color = Color(0xFFD5ECFF))
                 }
                 Button(
                     onClick = onRestoreDefaults,
-                    modifier = Modifier.height(36.dp),
+                    modifier = Modifier.height(38.dp),
                     shape = RoundedCornerShape(11.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 0.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = PanelBlue, contentColor = Color.White)
                 ) {
-                    Text("重置", style = MaterialTheme.typography.labelLarge)
+                    Text("恢复标准键位", style = MaterialTheme.typography.labelLarge)
                 }
             }
         }
