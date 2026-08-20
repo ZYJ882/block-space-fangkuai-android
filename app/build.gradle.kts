@@ -12,8 +12,8 @@ android {
         applicationId = "com.blockspace.tetris"
         minSdk = 26
         targetSdk = 35
-        versionCode = 26
-        versionName = "1.15.0"
+        versionCode = 27
+        versionName = "1.15.1"
     }
 
     buildFeatures {
@@ -40,12 +40,13 @@ kotlin {
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
     implementation(libs.androidx.ui.graphics)
     implementation(libs.androidx.ui.tooling.preview)
     implementation(libs.androidx.material3)
-    testImplementation("junit:junit:4.13.2")
+    testImplementation(libs.junit)
     debugImplementation(libs.androidx.ui.tooling)
 }

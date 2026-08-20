@@ -42,6 +42,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -59,6 +60,7 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -84,7 +86,8 @@ import com.blockspace.tetris.game.PieceLibrary
 import com.blockspace.tetris.game.TetrisGame
 import com.blockspace.tetris.game.TetrominoType
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -116,6 +119,26 @@ fun TetrisApp() {
     var timingRevision by remember { mutableIntStateOf(0) }
     var hasStarted by rememberSaveable { mutableStateOf(false) }
     var showControlSettings by rememberSaveable { mutableStateOf(false) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var appIsActive by remember { mutableStateOf(true) }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> {
+                    appIsActive = false
+                    timingRevision++
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    appIsActive = true
+                    timingRevision++
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     fun updateControlSettings(next: ControlSettings) {
         game.setFallSpeed(next.fallSpeed)
@@ -128,8 +151,8 @@ fun TetrisApp() {
         game.setFallSpeed(controlSettings.fallSpeed)
     }
 
-    LaunchedEffect(game, hasStarted, timingRevision) {
-        if (!hasStarted || game.isPaused || game.isGameOver) return@LaunchedEffect
+    LaunchedEffect(game, hasStarted, appIsActive, timingRevision) {
+        if (!hasStarted || !appIsActive || game.isPaused || game.isGameOver) return@LaunchedEffect
 
         val wakeDelayMillis = game.nextRuleEventDelayMillis()
         val startedAtNanos = System.nanoTime()
