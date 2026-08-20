@@ -1,8 +1,10 @@
 package com.manus.tetris.game
 
+import com.manus.tetris.controls.FallSpeedPreset
 import kotlin.math.ceil
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.roundToInt
 import kotlin.random.Random
 
 enum class TetrominoType(val color: Long) {
@@ -63,6 +65,10 @@ object ModernScoring {
 
     fun comboPoints(comboIndex: Int, level: Int): Int =
         min(50 * comboIndex * level, 50 * COMBO_CAP * level)
+
+    /** 速度只调节挑战型结算分；自动重力和手动下落格数分不参与倍率。 */
+    fun applyChallengeMultiplier(points: Int, multiplier: Double): Int =
+        (points * multiplier).roundToInt()
 
     fun perfectClearBonus(cleared: Int, b2bApplied: Boolean): Int = when (cleared) {
         1 -> 800
@@ -192,10 +198,16 @@ class TetrisGame(private val random: Random = Random.Default) {
         private set
     var lastScoreEvent: ScoreEvent? = null
         private set
+    var fallSpeedPreset: FallSpeedPreset = FallSpeedPreset.STANDARD
+        private set
 
     val level: Int get() = ModernGravity.levelForLines(lines)
-    val fallDelayMillis: Long get() = ModernGravity.nominalCellIntervalMillis(level)
-    val gravityCellsPerSecond: Double get() = ModernGravity.cellsPerSecond(level)
+    val fallDelayMillis: Long get() = ceil(
+        ModernGravity.nominalCellIntervalMillis(level) / fallSpeedPreset.gravityMultiplier
+    ).toLong()
+    val gravityCellsPerSecond: Double get() =
+        ModernGravity.cellsPerSecond(level) * fallSpeedPreset.gravityMultiplier
+    val challengeScoreMultiplier: Double get() = fallSpeedPreset.challengeScoreMultiplier
     val lockDelayRemainingMillis: Long get() = ceil(
         (ModernGravity.LOCK_DELAY_MILLIS - lockDelayElapsedMillis).coerceAtLeast(0.0)
     ).toLong()
@@ -229,6 +241,10 @@ class TetrisGame(private val random: Random = Random.Default) {
 
     fun togglePause() {
         if (!isGameOver) isPaused = !isPaused
+    }
+
+    fun setFallSpeed(preset: FallSpeedPreset) {
+        fallSpeedPreset = preset
     }
 
     fun moveLeft(): Boolean = tryMove(columnDelta = -1)
@@ -378,7 +394,10 @@ class TetrisGame(private val random: Random = Random.Default) {
         }
 
         if (cleared == 0) {
-            val tSpinPoints = action.basePoints * levelAtClear
+            val tSpinPoints = ModernScoring.applyChallengeMultiplier(
+                action.basePoints * levelAtClear,
+                challengeScoreMultiplier
+            )
             score += tSpinPoints
             consecutiveClears = 0
             combo = 0
@@ -398,7 +417,10 @@ class TetrisGame(private val random: Random = Random.Default) {
         val comboIndex = consecutiveClears
         val comboPoints = ModernScoring.comboPoints(comboIndex, levelAtClear)
         val perfectClearPoints = if (perfectClear) ModernScoring.perfectClearBonus(cleared, b2bApplied) * levelAtClear else 0
-        val totalPoints = lineClearPoints + comboPoints + perfectClearPoints
+        val totalPoints = ModernScoring.applyChallengeMultiplier(
+            lineClearPoints + comboPoints + perfectClearPoints,
+            challengeScoreMultiplier
+        )
 
         score += totalPoints
         lines += cleared
@@ -410,6 +432,7 @@ class TetrisGame(private val random: Random = Random.Default) {
                 append(action.title)
                 if (b2bApplied) append(" • B2B")
                 if (perfectClear) append(" • 全消")
+                if (challengeScoreMultiplier != 1.0) append(" • ×${fallSpeedPreset.challengeScoreMultiplier}")
             },
             points = totalPoints,
             combo = comboIndex,

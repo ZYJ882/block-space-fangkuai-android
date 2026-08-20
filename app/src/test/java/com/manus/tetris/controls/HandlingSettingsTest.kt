@@ -17,6 +17,20 @@ class HandlingSettingsTest {
     }
 
     @Test
+    fun fallSpeedIsIndependentFromHandlingAndHasTransparentMultipliers() {
+        val settings = ControlSettings()
+            .applyAdvancedHandling(dasMillis = 145L, arrMillis = 35L)
+            .applyFallSpeed(FallSpeedPreset.TURBO)
+
+        assertEquals(HandlingPreset.CUSTOM, settings.preset)
+        assertEquals(145L, settings.handling.dasMillis)
+        assertEquals(35L, settings.handling.arrMillis)
+        assertEquals(FallSpeedPreset.TURBO, settings.fallSpeed)
+        assertEquals(1.5, settings.fallSpeed.gravityMultiplier, 0.0)
+        assertEquals(1.5, settings.fallSpeed.challengeScoreMultiplier, 0.0)
+    }
+
+    @Test
     fun choosingPresetReplacesCustomHandlingValues() {
         val settings = ControlSettings()
             .applyAdvancedHandling(dasMillis = 210L, arrMillis = 30L)

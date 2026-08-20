@@ -49,6 +49,25 @@ data class HandlingSettings(
     }
 }
 
+/**
+ * 自动重力的时间倍率与挑战分倍率。下落动作分保持固定，只有清行等挑战结算随此倍率变化。
+ */
+enum class FallSpeedPreset(
+    val label: String,
+    val gravityMultiplier: Double,
+    val challengeScoreMultiplier: Double
+) {
+    RELAXED("悠闲", 0.75, 0.75),
+    STANDARD("标准", 1.00, 1.00),
+    FAST("快速", 1.25, 1.25),
+    TURBO("极速", 1.50, 1.50);
+
+    companion object {
+        fun fromName(value: String?): FallSpeedPreset =
+            entries.firstOrNull { it.name == value } ?: STANDARD
+    }
+}
+
 enum class ControlAction(val label: String, val symbol: String) {
     MOVE_LEFT("左移", "←"),
     MOVE_RIGHT("右移", "→"),
@@ -192,6 +211,7 @@ data class FreeControlLayout(val positions: Map<ControlAction, RelativeControlPo
 data class ControlSettings(
     val preset: HandlingPreset = HandlingPreset.COMFORT,
     val handling: HandlingSettings = HandlingSettings.fromPreset(HandlingPreset.COMFORT),
+    val fallSpeed: FallSpeedPreset = FallSpeedPreset.STANDARD,
     val layout: FreeControlLayout = FreeControlLayout.standard()
 ) {
     fun applyPreset(preset: HandlingPreset): ControlSettings = copy(
@@ -203,6 +223,8 @@ data class ControlSettings(
         preset = HandlingPreset.CUSTOM,
         handling = HandlingSettings.clamp(dasMillis, arrMillis)
     )
+
+    fun applyFallSpeed(fallSpeed: FallSpeedPreset): ControlSettings = copy(fallSpeed = fallSpeed)
 }
 
 class ControlSettingsStore(context: Context) {
@@ -216,6 +238,7 @@ class ControlSettingsStore(context: Context) {
         val defaultHandling = HandlingSettings.fromPreset(preset)
         return ControlSettings(
             preset = preset,
+            fallSpeed = FallSpeedPreset.fromName(preferences.getString(KEY_FALL_SPEED, null)),
             handling = HandlingSettings.clamp(
                 preferences.getLong(KEY_DAS, defaultHandling.dasMillis),
                 preferences.getLong(KEY_ARR, defaultHandling.arrMillis)
@@ -232,6 +255,7 @@ class ControlSettingsStore(context: Context) {
             .putString(KEY_PRESET, settings.preset.name)
             .putLong(KEY_DAS, settings.handling.dasMillis)
             .putLong(KEY_ARR, settings.handling.arrMillis)
+            .putString(KEY_FALL_SPEED, settings.fallSpeed.name)
             .putString(KEY_LAYOUT, settings.layout.encode())
             .apply()
     }
@@ -240,6 +264,7 @@ class ControlSettingsStore(context: Context) {
         const val KEY_PRESET = "handling_preset"
         const val KEY_DAS = "handling_das_ms"
         const val KEY_ARR = "handling_arr_ms"
+        const val KEY_FALL_SPEED = "fall_speed_preset"
         const val KEY_LAYOUT = "free_layout"
     }
 }

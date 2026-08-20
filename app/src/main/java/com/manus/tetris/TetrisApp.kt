@@ -67,6 +67,7 @@ import com.manus.tetris.controls.ControlAction
 import com.manus.tetris.controls.ControlAreaGeometry
 import com.manus.tetris.controls.ControlSettings
 import com.manus.tetris.controls.ControlSettingsStore
+import com.manus.tetris.controls.FallSpeedPreset
 import com.manus.tetris.controls.FreeControlLayout
 import com.manus.tetris.controls.PixelPoint
 import com.manus.tetris.controls.HandlingPreset
@@ -108,8 +109,13 @@ fun TetrisApp() {
     var showControlSettings by rememberSaveable { mutableStateOf(false) }
 
     fun updateControlSettings(next: ControlSettings) {
+        game.setFallSpeed(next.fallSpeed)
         controlSettings = next
         controlSettingsStore.save(next)
+    }
+
+    LaunchedEffect(game, controlSettings.fallSpeed) {
+        game.setFallSpeed(controlSettings.fallSpeed)
     }
 
     LaunchedEffect(game, hasStarted) {
@@ -283,7 +289,8 @@ private fun GameScreen(
                 eventTitle = scoreEvent?.title,
                 eventPoints = scoreEvent?.points ?: 0,
                 combo = game.combo,
-                b2bReady = game.isBackToBack
+                b2bReady = game.isBackToBack,
+                fallSpeed = controlSettings.fallSpeed
             )
             Spacer(Modifier.height(5.dp))
 
@@ -471,13 +478,46 @@ private fun FullScreenControlEditorToolbar(
                 }
             }
 
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("② 下落速度与挑战分", style = MaterialTheme.typography.labelLarge, color = Color(0xFFBFE8FF))
+                Text(
+                    "只改变自动下落速度。软降 +1/格、直降 +2/格固定；清行、T-Spin、连击和全消按挑战倍率结算。",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color(0xFFD5ECFF)
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    FallSpeedPreset.entries.forEach { speed ->
+                        Button(
+                            onClick = { onSettingsChange(settings.applyFallSpeed(speed)) },
+                            modifier = Modifier.weight(1f).height(36.dp),
+                            shape = RoundedCornerShape(11.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 1.dp, vertical = 0.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (settings.fallSpeed == speed) ActionGold else PanelBlueLight,
+                                contentColor = Color.White
+                            )
+                        ) {
+                            Text(speed.label, style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                }
+                Text(
+                    "当前：自动下落 ×${settings.fallSpeed.gravityMultiplier} · 挑战分 ×${settings.fallSpeed.challengeScoreMultiplier}",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color(0xFFFFD38A)
+                )
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("② 键位位置", style = MaterialTheme.typography.labelLarge, color = Color(0xFFBFE8FF))
+                    Text("③ 键位位置", style = MaterialTheme.typography.labelLarge, color = Color(0xFFBFE8FF))
                     Text("直接拖动下方真实按键即可调整位置。", style = MaterialTheme.typography.labelLarge, color = Color(0xFFD5ECFF))
                 }
                 Button(
@@ -635,7 +675,8 @@ private fun ScoreBanner(
     eventTitle: String?,
     eventPoints: Int,
     combo: Int,
-    b2bReady: Boolean
+    b2bReady: Boolean,
+    fallSpeed: FallSpeedPreset
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -646,6 +687,11 @@ private fun ScoreBanner(
             score.toString(),
             style = MaterialTheme.typography.titleLarge,
             color = Color.White
+        )
+        Text(
+            "速度 ×${fallSpeed.gravityMultiplier} · 挑战分 ×${fallSpeed.challengeScoreMultiplier}",
+            style = MaterialTheme.typography.labelLarge,
+            color = Color(0xFFBCE6FF)
         )
         when {
             eventTitle != null -> Text(

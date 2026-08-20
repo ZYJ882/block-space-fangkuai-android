@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import com.manus.tetris.controls.FallSpeedPreset
 import kotlin.random.Random
 
 class ModernGravityTest {
@@ -70,6 +71,24 @@ class ModernGravityTest {
 
         val blocksAfterSecondDrop = game.board().sumOf { row -> row.count { it != 0 } }
         assertEquals(8, blocksAfterSecondDrop)
+    }
+
+    @Test
+    fun speedPresetChangesGravityAndChallengeScoresButNotDropPoints() {
+        val game = TetrisGame(Random(23))
+        val baseGravity = game.gravityCellsPerSecond
+        val dropDistance = generateSequence(game.activePiece) { piece ->
+            val next = piece.moved(rowDelta = 1)
+            if (next.blocks().all { it.row in 0 until TetrisGame.ROWS }) next else null
+        }.count() - 1
+
+        game.setFallSpeed(FallSpeedPreset.TURBO)
+        assertEquals(baseGravity * 1.5, game.gravityCellsPerSecond, 0.0001)
+        assertEquals(1_200, ModernScoring.applyChallengeMultiplier(800, game.challengeScoreMultiplier))
+        assertEquals(2, ModernScoring.applyChallengeMultiplier(2, 1.0))
+
+        game.hardDrop()
+        assertEquals(dropDistance * 2, game.score)
     }
 
     @Test
