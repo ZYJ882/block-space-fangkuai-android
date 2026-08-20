@@ -33,6 +33,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -69,6 +70,7 @@ import com.manus.tetris.controls.ControlSettingsStore
 import com.manus.tetris.controls.FreeControlLayout
 import com.manus.tetris.controls.PixelPoint
 import com.manus.tetris.controls.HandlingPreset
+import com.manus.tetris.controls.HandlingSettings
 import com.manus.tetris.game.FallingPiece
 import com.manus.tetris.game.PieceLibrary
 import com.manus.tetris.game.TetrisGame
@@ -384,6 +386,7 @@ private fun FullScreenControlEditorToolbar(
     onDone: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var showAdvancedHandling by rememberSaveable { mutableStateOf(false) }
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -424,9 +427,9 @@ private fun FullScreenControlEditorToolbar(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    HandlingPreset.entries.forEach { preset ->
+                    HandlingPreset.entries.filter { it != HandlingPreset.CUSTOM }.forEach { preset ->
                         Button(
-                            onClick = { onSettingsChange(settings.copy(preset = preset)) },
+                            onClick = { onSettingsChange(settings.applyPreset(preset)) },
                             modifier = Modifier.weight(1f).height(36.dp),
                             shape = RoundedCornerShape(11.dp),
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 1.dp, vertical = 0.dp),
@@ -438,6 +441,27 @@ private fun FullScreenControlEditorToolbar(
                             Text(preset.label, style = MaterialTheme.typography.labelLarge)
                         }
                     }
+                }
+                Button(
+                    onClick = { showAdvancedHandling = !showAdvancedHandling },
+                    modifier = Modifier.fillMaxWidth().height(34.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (showAdvancedHandling) PanelBlueLight else PanelBlue,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text(
+                        if (showAdvancedHandling) "收起高级灵敏度" else "高级灵敏度（DAS / ARR）",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
+                if (showAdvancedHandling) {
+                    AdvancedHandlingPanel(
+                        settings = settings,
+                        onSettingsChange = onSettingsChange
+                    )
                 }
             }
 
@@ -460,6 +484,84 @@ private fun FullScreenControlEditorToolbar(
                     Text("恢复标准键位", style = MaterialTheme.typography.labelLarge)
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun AdvancedHandlingPanel(
+    settings: ControlSettings,
+    onSettingsChange: (ControlSettings) -> Unit
+) {
+    val handling = settings.handling
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(PanelBlue.copy(alpha = 0.74f))
+            .border(1.dp, PanelStroke.copy(alpha = 0.75f), RoundedCornerShape(12.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        Text(
+            "当前：${handling.dasMillis}ms DAS · ${handling.arrMillis}ms ARR",
+            style = MaterialTheme.typography.labelLarge,
+            color = Color.White
+        )
+        Text(
+            "DAS 是长按后开始连发前的等待时间。",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color(0xFFD5ECFF)
+        )
+        Text(
+            "DAS：${handling.dasMillis}ms（100–220ms）",
+            style = MaterialTheme.typography.labelLarge,
+            color = Color(0xFFBFE8FF)
+        )
+        Slider(
+            value = handling.dasMillis.toFloat(),
+            onValueChange = { value ->
+                onSettingsChange(
+                    settings.applyAdvancedHandling(
+                        dasMillis = value.roundToInt().toLong(),
+                        arrMillis = handling.arrMillis
+                    )
+                )
+            },
+            valueRange = HandlingSettings.DAS_RANGE.first.toFloat()..HandlingSettings.DAS_RANGE.last.toFloat(),
+            steps = 11
+        )
+        Text(
+            "ARR：${handling.arrMillis}ms（25–80ms）",
+            style = MaterialTheme.typography.labelLarge,
+            color = Color(0xFFBFE8FF)
+        )
+        Slider(
+            value = handling.arrMillis.toFloat(),
+            onValueChange = { value ->
+                onSettingsChange(
+                    settings.applyAdvancedHandling(
+                        dasMillis = handling.dasMillis,
+                        arrMillis = value.roundToInt().toLong()
+                    )
+                )
+            },
+            valueRange = HandlingSettings.ARR_RANGE.first.toFloat()..HandlingSettings.ARR_RANGE.last.toFloat(),
+            steps = 10
+        )
+        Text(
+            "ARR 是连发触发间隔；数值越小，连续移动越快。",
+            style = MaterialTheme.typography.labelSmall,
+            color = Color(0xFFD5ECFF)
+        )
+        Button(
+            onClick = { onSettingsChange(settings.applyPreset(HandlingPreset.COMFORT)) },
+            modifier = Modifier.fillMaxWidth().height(32.dp),
+            shape = RoundedCornerShape(10.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = PanelBlueLight, contentColor = Color.White)
+        ) {
+            Text("恢复推荐值（160ms / 50ms）", style = MaterialTheme.typography.labelLarge)
         }
     }
 }
@@ -842,10 +944,10 @@ private fun ControlSettingsOverlay(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    HandlingPreset.entries.forEach { preset ->
+                    HandlingPreset.entries.filter { it != HandlingPreset.CUSTOM }.forEach { preset ->
                         val selected = settings.preset == preset
                         Button(
-                            onClick = { onSettingsChange(settings.copy(preset = preset)) },
+                            onClick = { onSettingsChange(settings.applyPreset(preset)) },
                             modifier = Modifier.weight(1f),
                             shape = RoundedCornerShape(12.dp),
                             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 2.dp, vertical = 0.dp),
@@ -859,7 +961,7 @@ private fun ControlSettingsOverlay(
                     }
                 }
                 Text(
-                    "${settings.preset.initialDelayMillis}ms 启动 · ${settings.preset.repeatIntervalMillis}ms 重复",
+                    "${settings.handling.dasMillis}ms 启动 · ${settings.handling.arrMillis}ms 重复",
                     style = MaterialTheme.typography.labelLarge,
                     color = Color(0xFFD5ECFF)
                 )
@@ -1029,8 +1131,8 @@ private fun FreeTouchControls(
                 onLayoutChange = { next -> onControlSettingsChange(controlSettings.copy(layout = next)) },
                 buttonWidth = buttonWidth,
                 buttonHeight = buttonHeight,
-                initialDelayMillis = controlSettings.preset.initialDelayMillis,
-                repeatIntervalMillis = controlSettings.preset.repeatIntervalMillis,
+                initialDelayMillis = controlSettings.handling.dasMillis,
+                repeatIntervalMillis = controlSettings.handling.arrMillis,
                 onMoveLeft = onMoveLeft,
                 onMoveRight = onMoveRight,
                 onSoftDrop = onSoftDrop,

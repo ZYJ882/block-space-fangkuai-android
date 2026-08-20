@@ -1,0 +1,29 @@
+package com.manus.tetris.controls
+
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+class HandlingSettingsTest {
+    @Test
+    fun advancedHandlingIsClampedToTheSupportedSafeRange() {
+        val settings = ControlSettings().applyAdvancedHandling(
+            dasMillis = 1L,
+            arrMillis = 500L
+        )
+
+        assertEquals(HandlingPreset.CUSTOM, settings.preset)
+        assertEquals(100L, settings.handling.dasMillis)
+        assertEquals(80L, settings.handling.arrMillis)
+    }
+
+    @Test
+    fun choosingPresetReplacesCustomHandlingValues() {
+        val settings = ControlSettings()
+            .applyAdvancedHandling(dasMillis = 210L, arrMillis = 30L)
+            .applyPreset(HandlingPreset.COMPETITIVE)
+
+        assertEquals(HandlingPreset.COMPETITIVE, settings.preset)
+        assertEquals(120L, settings.handling.dasMillis)
+        assertEquals(33L, settings.handling.arrMillis)
+    }
+}

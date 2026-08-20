@@ -11,11 +11,41 @@ enum class HandlingPreset(
 ) {
     COMFORT("舒适", 160L, 50L),
     FAST("快速", 130L, 40L),
-    COMPETITIVE("竞技", 120L, 33L);
+    COMPETITIVE("竞技", 120L, 33L),
+    CUSTOM("自定义", 160L, 50L);
 
     companion object {
         fun fromName(value: String?): HandlingPreset =
             entries.firstOrNull { it.name == value } ?: COMFORT
+    }
+}
+
+/**
+ * 高级长按参数。范围限定为 DAS 100–220ms、ARR 25–80ms，
+ * 以防止触屏连续移动过快导致难以停止，或过慢失去操作意义。
+ */
+data class HandlingSettings(
+    val dasMillis: Long,
+    val arrMillis: Long
+) {
+    init {
+        require(dasMillis in DAS_RANGE) { "DAS 必须在 ${DAS_RANGE.first}–${DAS_RANGE.last}ms 之间" }
+        require(arrMillis in ARR_RANGE) { "ARR 必须在 ${ARR_RANGE.first}–${ARR_RANGE.last}ms 之间" }
+    }
+
+    companion object {
+        val DAS_RANGE: LongRange = 100L..220L
+        val ARR_RANGE: LongRange = 25L..80L
+
+        fun fromPreset(preset: HandlingPreset): HandlingSettings = HandlingSettings(
+            dasMillis = preset.initialDelayMillis,
+            arrMillis = preset.repeatIntervalMillis
+        )
+
+        fun clamp(dasMillis: Long, arrMillis: Long): HandlingSettings = HandlingSettings(
+            dasMillis = dasMillis.coerceIn(DAS_RANGE),
+            arrMillis = arrMillis.coerceIn(ARR_RANGE)
+        )
     }
 }
 
@@ -161,8 +191,19 @@ data class FreeControlLayout(val positions: Map<ControlAction, RelativeControlPo
 
 data class ControlSettings(
     val preset: HandlingPreset = HandlingPreset.COMFORT,
+    val handling: HandlingSettings = HandlingSettings.fromPreset(HandlingPreset.COMFORT),
     val layout: FreeControlLayout = FreeControlLayout.standard()
-)
+) {
+    fun applyPreset(preset: HandlingPreset): ControlSettings = copy(
+        preset = preset,
+        handling = HandlingSettings.fromPreset(preset)
+    )
+
+    fun applyAdvancedHandling(dasMillis: Long, arrMillis: Long): ControlSettings = copy(
+        preset = HandlingPreset.CUSTOM,
+        handling = HandlingSettings.clamp(dasMillis, arrMillis)
+    )
+}
 
 class ControlSettingsStore(context: Context) {
     private val preferences = context.applicationContext.getSharedPreferences(
@@ -170,23 +211,35 @@ class ControlSettingsStore(context: Context) {
         Context.MODE_PRIVATE
     )
 
-    fun load(): ControlSettings = ControlSettings(
-        preset = HandlingPreset.fromName(preferences.getString(KEY_PRESET, null)),
-        layout = FreeControlLayout.decode(
-            preferences.getString(KEY_LAYOUT, null),
-            FreeControlLayout.standard()
+    fun load(): ControlSettings {
+        val preset = HandlingPreset.fromName(preferences.getString(KEY_PRESET, null))
+        val defaultHandling = HandlingSettings.fromPreset(preset)
+        return ControlSettings(
+            preset = preset,
+            handling = HandlingSettings.clamp(
+                preferences.getLong(KEY_DAS, defaultHandling.dasMillis),
+                preferences.getLong(KEY_ARR, defaultHandling.arrMillis)
+            ),
+            layout = FreeControlLayout.decode(
+                preferences.getString(KEY_LAYOUT, null),
+                FreeControlLayout.standard()
+            )
         )
-    )
+    }
 
     fun save(settings: ControlSettings) {
         preferences.edit()
             .putString(KEY_PRESET, settings.preset.name)
+            .putLong(KEY_DAS, settings.handling.dasMillis)
+            .putLong(KEY_ARR, settings.handling.arrMillis)
             .putString(KEY_LAYOUT, settings.layout.encode())
             .apply()
     }
 
     private companion object {
         const val KEY_PRESET = "handling_preset"
+        const val KEY_DAS = "handling_das_ms"
+        const val KEY_ARR = "handling_arr_ms"
         const val KEY_LAYOUT = "free_layout"
     }
 }
