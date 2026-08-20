@@ -17,6 +17,29 @@ enum class TetrominoType(val color: Long) {
     L(0xFFFFA84A)
 }
 
+/**
+ * 标准 Guideline 7-Bag：每一袋恰有 I、O、T、S、Z、J、L 各一个，洗牌后依次发出。
+ * 注入 Random 使固定种子下的对局和测试结果可复现。
+ */
+class SevenBagGenerator(private val random: Random = Random.Default) {
+    private val remaining = ArrayDeque<TetrominoType>()
+
+    fun next(): TetrominoType {
+        if (remaining.isEmpty()) refill()
+        return remaining.removeFirst()
+    }
+
+    fun reset() {
+        remaining.clear()
+    }
+
+    private fun refill() {
+        val bag = TetrominoType.entries.toMutableList()
+        bag.shuffle(random)
+        remaining.addAll(bag)
+    }
+}
+
 data class Block(val row: Int, val column: Int)
 
 data class FallingPiece(
@@ -166,7 +189,7 @@ object PieceLibrary {
         shapes.getValue(type)[rotation % 4]
 }
 
-class TetrisGame(private val random: Random = Random.Default) {
+class TetrisGame(random: Random = Random.Default) {
     companion object {
         const val ROWS = 20
         const val COLUMNS = 10
@@ -176,6 +199,7 @@ class TetrisGame(private val random: Random = Random.Default) {
     }
 
     private val cells = Array(ROWS) { IntArray(COLUMNS) { EMPTY } }
+    private val pieceGenerator = SevenBagGenerator(random)
     private var active: FallingPiece? = null
     private val upcomingQueue = ArrayDeque<TetrominoType>()
     private var lastActionWasRotation = false
@@ -267,8 +291,9 @@ class TetrisGame(private val random: Random = Random.Default) {
         resetPieceTiming()
         isPaused = false
         isGameOver = false
+        pieceGenerator.reset()
         upcomingQueue.clear()
-        repeat(4) { upcomingQueue.addLast(randomType()) }
+        repeat(4) { upcomingQueue.addLast(pieceGenerator.next()) }
         spawnPiece(guardHardDrop = false)
     }
 
@@ -510,7 +535,7 @@ class TetrisGame(private val random: Random = Random.Default) {
 
     private fun spawnPiece(guardHardDrop: Boolean) {
         val type = upcomingQueue.removeFirst()
-        upcomingQueue.addLast(randomType())
+        upcomingQueue.addLast(pieceGenerator.next())
         val candidate = FallingPiece(type, rotation = 0, row = 0, column = SPAWN_COLUMN)
         if (canPlace(candidate)) {
             active = candidate
@@ -563,5 +588,4 @@ class TetrisGame(private val random: Random = Random.Default) {
             cells[block.row][block.column] == EMPTY
     }
 
-    private fun randomType(): TetrominoType = TetrominoType.entries[random.nextInt(TetrominoType.entries.size)]
 }
