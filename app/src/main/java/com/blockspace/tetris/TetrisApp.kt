@@ -135,8 +135,9 @@ fun TetrisApp() {
                 val elapsedMillis = ((nowNanos - previousFrameNanos) / 1_000_000L)
                     .coerceIn(1L, 100L)
                 previousFrameNanos = nowNanos
-                game.advanceTime(elapsedMillis)
-                revision++
+                if (game.advanceTime(elapsedMillis)) {
+                    revision++
+                }
             } else {
                 previousFrameNanos = System.nanoTime()
                 delay(100)

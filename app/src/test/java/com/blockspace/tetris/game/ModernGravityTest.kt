@@ -33,7 +33,7 @@ class ModernGravityTest {
         val game = TetrisGame(Random(7))
         val startRow = game.activePiece!!.row
 
-        game.advanceTime(1_000L)
+        assertTrue(game.advanceTime(1_000L))
 
         assertEquals(startRow + 1, game.activePiece!!.row)
         assertEquals(0, game.score)
@@ -45,10 +45,18 @@ class ModernGravityTest {
         while (game.softDrop()) Unit
         val groundedPiece = game.activePiece!!
 
-        game.advanceTime(499L)
+        assertFalse(game.advanceTime(499L))
         assertEquals(groundedPiece, game.activePiece)
 
-        game.advanceTime(1L)
+        assertTrue(game.advanceTime(1L))
+        assertEquals(0, game.activePiece!!.row)
+    }
+
+    @Test
+    fun idleGravityFrameDoesNotRequestRedraw() {
+        val game = TetrisGame(Random(17))
+
+        assertFalse(game.advanceTime(16L))
         assertEquals(0, game.activePiece!!.row)
     }
 

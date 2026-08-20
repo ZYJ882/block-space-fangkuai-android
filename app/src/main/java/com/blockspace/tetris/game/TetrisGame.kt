@@ -311,18 +311,17 @@ class TetrisGame(private val random: Random = Random.Default) {
     /**
      * 按真实经过的时间推进游戏。累积小数格重力可准确支持超过 1G 的高等级速度。
      */
-    fun advanceTime(deltaMillis: Long) {
-        if (!canControl() || deltaMillis <= 0L) return
+    fun advanceTime(deltaMillis: Long): Boolean {
+        if (!canControl() || deltaMillis <= 0L) return false
         hardDropGuardMillis = (hardDropGuardMillis - deltaMillis).coerceAtLeast(0L)
 
         if (isGrounded()) {
-            advanceLockDelay(deltaMillis)
-            return
+            return advanceLockDelay(deltaMillis)
         }
 
         gravityProgressCells += gravityCellsPerSecond * deltaMillis / 1000.0
         val wholeCells = gravityProgressCells.toInt()
-        if (wholeCells <= 0) return
+        if (wholeCells <= 0) return false
         gravityProgressCells -= wholeCells
 
         repeat(wholeCells) {
@@ -331,14 +330,14 @@ class TetrisGame(private val random: Random = Random.Default) {
                 active = moved
                 lastActionWasRotation = false
             } else {
-                advanceLockDelay(deltaMillis)
-                return
+                return advanceLockDelay(deltaMillis)
             }
         }
+        return true
     }
 
     /** 保留给兼容调用方的单步推进入口。 */
-    fun tick() = advanceTime(fallDelayMillis)
+    fun tick(): Boolean = advanceTime(fallDelayMillis)
 
     fun ghostPiece(): FallingPiece? {
         val piece = active ?: return null
@@ -511,9 +510,11 @@ class TetrisGame(private val random: Random = Random.Default) {
         !canPlace(piece.moved(rowDelta = 1))
     } ?: false
 
-    private fun advanceLockDelay(deltaMillis: Long) {
+    private fun advanceLockDelay(deltaMillis: Long): Boolean {
         lockDelayElapsedMillis += deltaMillis
-        if (ModernGravity.shouldLock(lockDelayElapsedMillis)) lockPiece()
+        if (!ModernGravity.shouldLock(lockDelayElapsedMillis)) return false
+        lockPiece()
+        return true
     }
 
     private fun afterGroundedManipulation() {
