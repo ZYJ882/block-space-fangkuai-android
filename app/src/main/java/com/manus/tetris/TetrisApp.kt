@@ -147,18 +147,14 @@ fun TetrisApp() {
                 onPause = { updateGame { game.togglePause() } },
                 onRestart = { updateGame { game.startNewGame() } },
                 controlSettings = controlSettings,
+                isEditingControls = showControlSettings,
+                onControlSettingsChange = ::updateControlSettings,
+                onFinishControlEditing = { showControlSettings = false },
                 onOpenControlSettings = {
                     if (!game.isPaused) updateGame { game.togglePause() }
                     showControlSettings = true
                 }
             )
-            if (showControlSettings) {
-                ControlSettingsOverlay(
-                    settings = controlSettings,
-                    onSettingsChange = ::updateControlSettings,
-                    onDismiss = { showControlSettings = false }
-                )
-            }
         }
     }
 }
@@ -243,6 +239,9 @@ private fun GameScreen(
     onPause: () -> Unit,
     onRestart: () -> Unit,
     controlSettings: ControlSettings,
+    isEditingControls: Boolean,
+    onControlSettingsChange: (ControlSettings) -> Unit,
+    onFinishControlEditing: () -> Unit,
     onOpenControlSettings: () -> Unit
 ) {
     @Suppress("UNUSED_VARIABLE")
@@ -355,12 +354,96 @@ private fun GameScreen(
                 .padding(horizontal = 6.dp),
             gameOver = game.isGameOver,
             controlSettings = controlSettings,
+            isEditing = isEditingControls,
+            onControlSettingsChange = onControlSettingsChange,
             onMoveLeft = onMoveLeft,
             onMoveRight = onMoveRight,
             onRotate = onRotate,
             onSoftDrop = onSoftDrop,
             onHardDrop = onHardDrop
         )
+        if (isEditingControls) {
+            FullScreenControlEditorToolbar(
+                settings = controlSettings,
+                onSettingsChange = onControlSettingsChange,
+                onRestoreDefaults = { onControlSettingsChange(controlSettings.copy(layout = FreeControlLayout.standard())) },
+                onDone = onFinishControlEditing,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 4.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun FullScreenControlEditorToolbar(
+    settings: ControlSettings,
+    onSettingsChange: (ControlSettings) -> Unit,
+    onRestoreDefaults: () -> Unit,
+    onDone: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 10.dp),
+        colors = CardDefaults.cardColors(containerColor = BoardBackground.copy(alpha = 0.96f)),
+        border = BorderStroke(1.dp, PanelStroke),
+        shape = RoundedCornerShape(18.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column {
+                    Text("键位编辑", style = MaterialTheme.typography.titleMedium, color = Color.White)
+                    Text("直接拖动下方真实按键", style = MaterialTheme.typography.labelLarge, color = Color(0xFFBFE8FF))
+                }
+                Button(
+                    onClick = onDone,
+                    modifier = Modifier.height(38.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 0.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = ActionGold, contentColor = Color.White)
+                ) {
+                    Text("完成", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                HandlingPreset.entries.forEach { preset ->
+                    Button(
+                        onClick = { onSettingsChange(settings.copy(preset = preset)) },
+                        modifier = Modifier.weight(1f).height(36.dp),
+                        shape = RoundedCornerShape(11.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 1.dp, vertical = 0.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (settings.preset == preset) ActionPurple else PanelBlueLight,
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text(preset.label, style = MaterialTheme.typography.labelLarge)
+                    }
+                }
+                Button(
+                    onClick = onRestoreDefaults,
+                    modifier = Modifier.height(36.dp),
+                    shape = RoundedCornerShape(11.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = PanelBlue, contentColor = Color.White)
+                ) {
+                    Text("重置", style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        }
     }
 }
 
@@ -885,13 +968,23 @@ private fun FreeTouchControls(
     modifier: Modifier,
     gameOver: Boolean,
     controlSettings: ControlSettings,
+    isEditing: Boolean,
+    onControlSettingsChange: (ControlSettings) -> Unit,
     onMoveLeft: () -> Unit,
     onMoveRight: () -> Unit,
     onRotate: () -> Unit,
     onSoftDrop: () -> Unit,
     onHardDrop: () -> Unit
 ) {
-    BoxWithConstraints(modifier = modifier) {
+    val canvasModifier = if (isEditing) {
+        modifier
+            .clip(RoundedCornerShape(18.dp))
+            .background(PanelBlue.copy(alpha = 0.38f))
+            .border(1.dp, PanelStroke, RoundedCornerShape(18.dp))
+    } else {
+        modifier
+    }
+    BoxWithConstraints(modifier = canvasModifier) {
         val density = LocalDensity.current
         val buttonWidth = if (maxWidth >= 340.dp) 64.dp else 56.dp
         val buttonHeight = if (maxWidth >= 340.dp) 58.dp else 54.dp
@@ -915,6 +1008,8 @@ private fun FreeTouchControls(
                 layout = activeLayout,
                 geometry = geometry,
                 enabled = !gameOver,
+                isEditing = isEditing,
+                onLayoutChange = { next -> onControlSettingsChange(controlSettings.copy(layout = next)) },
                 buttonWidth = buttonWidth,
                 buttonHeight = buttonHeight,
                 initialDelayMillis = controlSettings.preset.initialDelayMillis,
@@ -935,6 +1030,8 @@ private fun FreeGameplayButton(
     layout: FreeControlLayout,
     geometry: ControlAreaGeometry,
     enabled: Boolean,
+    isEditing: Boolean,
+    onLayoutChange: (FreeControlLayout) -> Unit,
     buttonWidth: Dp,
     buttonHeight: Dp,
     initialDelayMillis: Long,
@@ -945,6 +1042,15 @@ private fun FreeGameplayButton(
     onRotate: () -> Unit,
     onHardDrop: () -> Unit
 ) {
+    if (isEditing) {
+        FreePositionedEditorButton(
+            action = action,
+            layout = layout,
+            geometry = geometry,
+            onLayoutChange = onLayoutChange
+        )
+        return
+    }
     val position = geometry.toPixel(layout.positionOf(action))
     ControlButtonForAction(
         action = action,
