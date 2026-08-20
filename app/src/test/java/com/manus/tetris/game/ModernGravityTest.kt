@@ -52,6 +52,27 @@ class ModernGravityTest {
     }
 
     @Test
+    fun spawnedPieceHardDropGuardPreventsResidualTapButKeepsOtherControlsAvailable() {
+        val game = TetrisGame(Random(19))
+        game.hardDrop()
+        val spawnedPiece = game.activePiece!!
+        val blocksAfterFirstDrop = game.board().sumOf { row -> row.count { it != 0 } }
+
+        game.hardDrop()
+        assertEquals(spawnedPiece, game.activePiece)
+        assertEquals(4, blocksAfterFirstDrop)
+        assertEquals(InputSafetyRules.HARD_DROP_SPAWN_GUARD_MILLIS, game.hardDropGuardRemainingMillis)
+        assertTrue(game.moveLeft())
+
+        game.advanceTime(InputSafetyRules.HARD_DROP_SPAWN_GUARD_MILLIS)
+        assertEquals(0L, game.hardDropGuardRemainingMillis)
+        game.hardDrop()
+
+        val blocksAfterSecondDrop = game.board().sumOf { row -> row.count { it != 0 } }
+        assertEquals(8, blocksAfterSecondDrop)
+    }
+
+    @Test
     fun lockDelayAndMoveResetLimitsFollowModernRules() {
         assertFalse(ModernGravity.shouldLock(499.0))
         assertTrue(ModernGravity.shouldLock(500.0))

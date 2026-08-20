@@ -103,6 +103,13 @@ object ModernGravity {
     fun canResetLock(resetCount: Int): Boolean = resetCount < MAX_LOCK_RESETS
 }
 
+/** 新方块生成后的输入安全规则，仅拦截可能被残留点击触发的直降。 */
+object InputSafetyRules {
+    const val HARD_DROP_SPAWN_GUARD_MILLIS = 120L
+
+    fun canHardDrop(remainingMillis: Long): Boolean = remainingMillis <= 0L
+}
+
 object PieceLibrary {
     private val shapes: Map<TetrominoType, Array<Array<Pair<Int, Int>>>> = mapOf(
         TetrominoType.I to arrayOf(
@@ -169,6 +176,7 @@ class TetrisGame(private val random: Random = Random.Default) {
     private var gravityProgressCells = 0.0
     private var lockDelayElapsedMillis = 0.0
     private var lockResetCount = 0
+    private var hardDropGuardMillis = 0L
 
     var score: Int = 0
         private set
@@ -191,6 +199,7 @@ class TetrisGame(private val random: Random = Random.Default) {
     val lockDelayRemainingMillis: Long get() = ceil(
         (ModernGravity.LOCK_DELAY_MILLIS - lockDelayElapsedMillis).coerceAtLeast(0.0)
     ).toLong()
+    val hardDropGuardRemainingMillis: Long get() = hardDropGuardMillis
     val activePiece: FallingPiece? get() = active
     val nextType: TetrominoType get() = upcomingQueue.first()
     val upcomingTypes: List<TetrominoType> get() = upcomingQueue.take(3)
@@ -215,7 +224,7 @@ class TetrisGame(private val random: Random = Random.Default) {
         isGameOver = false
         upcomingQueue.clear()
         repeat(4) { upcomingQueue.addLast(randomType()) }
-        spawnPiece()
+        spawnPiece(guardHardDrop = false)
     }
 
     fun togglePause() {
@@ -259,7 +268,7 @@ class TetrisGame(private val random: Random = Random.Default) {
     }
 
     fun hardDrop() {
-        if (!canControl()) return
+        if (!canControl() || !InputSafetyRules.canHardDrop(hardDropGuardMillis)) return
         var distance = 0
         while (canPlace(active!!.moved(rowDelta = 1))) {
             active = active!!.moved(rowDelta = 1)
@@ -275,6 +284,7 @@ class TetrisGame(private val random: Random = Random.Default) {
      */
     fun advanceTime(deltaMillis: Long) {
         if (!canControl() || deltaMillis <= 0L) return
+        hardDropGuardMillis = (hardDropGuardMillis - deltaMillis).coerceAtLeast(0L)
 
         if (isGrounded()) {
             advanceLockDelay(deltaMillis)
@@ -335,7 +345,7 @@ class TetrisGame(private val random: Random = Random.Default) {
         applyScoring(cleared, tSpin, perfectClear)
         lastActionWasRotation = false
         resetPieceTiming()
-        spawnPiece()
+        spawnPiece(guardHardDrop = true)
     }
 
     private fun clearCompletedRows(): Int {
@@ -437,13 +447,18 @@ class TetrisGame(private val random: Random = Random.Default) {
         } >= 3
     }
 
-    private fun spawnPiece() {
+    private fun spawnPiece(guardHardDrop: Boolean) {
         val type = upcomingQueue.removeFirst()
         upcomingQueue.addLast(randomType())
         val candidate = FallingPiece(type, rotation = 0, row = 0, column = SPAWN_COLUMN)
         if (canPlace(candidate)) {
             active = candidate
             resetPieceTiming()
+            hardDropGuardMillis = if (guardHardDrop) {
+                InputSafetyRules.HARD_DROP_SPAWN_GUARD_MILLIS
+            } else {
+                0L
+            }
         } else {
             active = null
             isGameOver = true
