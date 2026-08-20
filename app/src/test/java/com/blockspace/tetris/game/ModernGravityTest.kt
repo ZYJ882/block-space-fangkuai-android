@@ -1,10 +1,10 @@
-package com.manus.tetris.game
+package com.blockspace.tetris.game
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import com.manus.tetris.controls.FallSpeedPreset
+import com.blockspace.tetris.controls.FallSpeedPreset
 import kotlin.random.Random
 
 class ModernGravityTest {

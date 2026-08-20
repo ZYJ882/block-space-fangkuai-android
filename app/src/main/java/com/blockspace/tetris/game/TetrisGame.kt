@@ -1,6 +1,6 @@
-package com.manus.tetris.game
+package com.blockspace.tetris.game
 
-import com.manus.tetris.controls.FallSpeedPreset
+import com.blockspace.tetris.controls.FallSpeedPreset
 import kotlin.math.ceil
 import kotlin.math.min
 import kotlin.math.pow

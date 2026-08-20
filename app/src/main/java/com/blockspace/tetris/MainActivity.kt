@@ -1,10 +1,10 @@
-package com.manus.tetris
+package com.blockspace.tetris
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import com.manus.tetris.ui.theme.TetrisTheme
+import com.blockspace.tetris.ui.theme.TetrisTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {

@@ -1,4 +1,4 @@
-package com.manus.tetris.controls
+package com.blockspace.tetris.controls
 
 import android.content.Context
 import kotlin.math.max

@@ -1,4 +1,4 @@
-package com.manus.tetris.game
+package com.blockspace.tetris.game
 
 import org.junit.Assert.assertEquals
 import org.junit.Test

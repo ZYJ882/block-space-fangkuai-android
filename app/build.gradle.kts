@@ -5,15 +5,15 @@ plugins {
 }
 
 android {
-    namespace = "com.manus.tetris"
+    namespace = "com.blockspace.tetris"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.manus.tetris"
+        applicationId = "com.blockspace.tetris"
         minSdk = 26
         targetSdk = 35
-        versionCode = 21
-        versionName = "1.12.0"
+        versionCode = 22
+        versionName = "1.13.0"
     }
 
     buildFeatures {

@@ -1,4 +1,4 @@
-package com.manus.tetris.controls
+package com.blockspace.tetris.controls
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse

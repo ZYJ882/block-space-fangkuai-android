@@ -2,8 +2,8 @@
 
 **方块空间 / Block Space** 是一个使用 **Kotlin + Jetpack Compose** 实现的 Android 原生单机俄罗斯方块应用。项目采用完整的 Gradle Wrapper，能够直接导入 Android Studio；同时随交付提供已构建并验证的调试版 APK。
 
-> 应用包名：`com.manus.tetris`  
-> 当前版本：`1.12.0`
+> 应用包名：`com.blockspace.tetris`
+> 当前版本：`1.13.0`
 > 最低 Android 版本：Android 8.0（API 26）
 
 ## 已实现功能
@@ -27,7 +27,7 @@
 TetrisNative/
 ├── app/
 │   └── src/main/
-│       ├── java/com/manus/tetris/
+│       ├── java/com/blockspace/tetris/
 │       │   ├── MainActivity.kt          # 应用入口
 │       │   ├── TetrisApp.kt             # Compose 界面与游戏循环
 │       │   ├── game/TetrisGame.kt       # 玩法规则与状态机
@@ -39,6 +39,10 @@ TetrisNative/
 ├── build.gradle.kts
 └── settings.gradle.kts
 ```
+
+## 包名迁移说明
+
+> 自 v1.13.0 起，应用包名从 `com.manus.tetris` 迁移为 **`com.blockspace.tetris`**。Android 会将其识别为新的应用标识；如设备上仍装有旧包名版本，请直接安装新 APK（两者可并存），或先卸载旧版后再安装以保持桌面与数据整洁。
 
 ## 在 Android Studio 中运行
 
@@ -78,9 +82,9 @@ app/build/outputs/apk/debug/app-debug.apk
 | Gradle 调试构建 | 通过 |
 | APK 输出 | `app-debug.apk` 已生成 |
 | APK 签名 | Android Debug 签名校验通过 |
-| 包名 | `com.manus.tetris` |
+| 包名 | `com.blockspace.tetris` |
 | 应用名称 | 方块空间 |
-| APK SHA-256 | `b2aa7dcb204626f8bcd9debbddc76ec54a160cb1f273dc3af00051fe7f353f02` |
+| APK SHA-256 | `40926e3099e33412f7cce707d9acae791ad590b068ebb630c85005ec697b097d` |
 
 ## 操作说明
 

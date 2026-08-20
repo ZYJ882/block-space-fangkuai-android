@@ -1,4 +1,4 @@
-package com.manus.tetris.ui.theme
+package com.blockspace.tetris.ui.theme
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
