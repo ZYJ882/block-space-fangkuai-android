@@ -61,6 +61,34 @@ class ModernGravityTest {
     }
 
     @Test
+    fun nextRuleEventUsesNearestGravityGuardAndLockDeadline() {
+        val game = TetrisGame(Random(31))
+
+        assertEquals(1_000L, game.nextRuleEventDelayMillis())
+        assertFalse(game.advanceTime(250L))
+        assertEquals(750L, game.nextRuleEventDelayMillis())
+
+        assertTrue(game.hardDrop())
+        assertEquals(InputSafetyRules.HARD_DROP_SPAWN_GUARD_MILLIS, game.nextRuleEventDelayMillis())
+        assertFalse(game.advanceTime(InputSafetyRules.HARD_DROP_SPAWN_GUARD_MILLIS))
+        assertEquals(880L, game.nextRuleEventDelayMillis())
+
+        while (game.softDrop()) Unit
+        assertEquals(ModernGravity.LOCK_DELAY_MILLIS.toLong(), game.nextRuleEventDelayMillis())
+        assertFalse(game.advanceTime(499L))
+        assertEquals(1L, game.nextRuleEventDelayMillis())
+    }
+
+    @Test
+    fun pausedGameHasNoPendingRuleWakeup() {
+        val game = TetrisGame(Random(37))
+
+        game.togglePause()
+
+        assertEquals(TetrisGame.NO_PENDING_EVENT_MILLIS, game.nextRuleEventDelayMillis())
+    }
+
+    @Test
     fun spawnedPieceHardDropGuardPreventsResidualTapButKeepsOtherControlsAvailable() {
         val game = TetrisGame(Random(19))
         game.hardDrop()

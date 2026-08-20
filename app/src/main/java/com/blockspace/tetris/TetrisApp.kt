@@ -113,6 +113,7 @@ fun TetrisApp() {
     val controlSettingsStore = remember(context) { ControlSettingsStore(context) }
     var controlSettings by remember { mutableStateOf(controlSettingsStore.load()) }
     var revision by remember { mutableIntStateOf(0) }
+    var timingRevision by remember { mutableIntStateOf(0) }
     var hasStarted by rememberSaveable { mutableStateOf(false) }
     var showControlSettings by rememberSaveable { mutableStateOf(false) }
 
@@ -120,34 +121,34 @@ fun TetrisApp() {
         game.setFallSpeed(next.fallSpeed)
         controlSettings = next
         controlSettingsStore.save(next)
+        timingRevision++
     }
 
     LaunchedEffect(game, controlSettings.fallSpeed) {
         game.setFallSpeed(controlSettings.fallSpeed)
     }
 
-    LaunchedEffect(game, hasStarted) {
-        var previousFrameNanos = System.nanoTime()
-        while (isActive) {
-            if (hasStarted && !game.isPaused && !game.isGameOver) {
-                delay(16)
-                val nowNanos = System.nanoTime()
-                val elapsedMillis = ((nowNanos - previousFrameNanos) / 1_000_000L)
-                    .coerceIn(1L, 100L)
-                previousFrameNanos = nowNanos
-                if (game.advanceTime(elapsedMillis)) {
-                    revision++
-                }
-            } else {
-                previousFrameNanos = System.nanoTime()
-                delay(100)
-            }
+    LaunchedEffect(game, hasStarted, timingRevision) {
+        if (!hasStarted || game.isPaused || game.isGameOver) return@LaunchedEffect
+
+        val wakeDelayMillis = game.nextRuleEventDelayMillis()
+        val startedAtNanos = System.nanoTime()
+        delay(wakeDelayMillis)
+        val elapsedMillis = ((System.nanoTime() - startedAtNanos) / 1_000_000L)
+            .coerceAtLeast(1L)
+
+        if (game.advanceTime(elapsedMillis)) {
+            revision++
         }
+        // 规则事件到期、输入或状态切换后重新计算最近的到期时间。
+        timingRevision++
     }
 
     fun updateGame(action: () -> Unit) {
         action()
         revision++
+        // 输入会改变重力进度、锁定时间或直降保护，需要取消旧等待并重新安排。
+        timingRevision++
     }
 
     if (!hasStarted) {

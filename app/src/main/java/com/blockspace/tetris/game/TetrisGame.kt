@@ -172,6 +172,7 @@ class TetrisGame(private val random: Random = Random.Default) {
         const val COLUMNS = 10
         private const val EMPTY = 0
         private const val SPAWN_COLUMN = 3
+        const val NO_PENDING_EVENT_MILLIS = 1_000L
     }
 
     private val cells = Array(ROWS) { IntArray(COLUMNS) { EMPTY } }
@@ -221,6 +222,26 @@ class TetrisGame(private val random: Random = Random.Default) {
     ).toLong()
     val hardDropGuardRemainingMillis: Long get() = hardDropGuardMillis
     val activePiece: FallingPiece? get() = active
+
+    /**
+     * 返回下一条会改变规则状态的事件距离当前的最短等待时间。
+     * 规则时间与显示刷新率无关；UI 只在规则改变或短动画运行时刷新。
+     */
+    fun nextRuleEventDelayMillis(): Long {
+        if (!canControl()) return NO_PENDING_EVENT_MILLIS
+
+        val gravityDelay = if (isGrounded()) {
+            Long.MAX_VALUE
+        } else {
+            val remainingCells = (1.0 - gravityProgressCells).coerceAtLeast(0.0)
+            ceil(remainingCells / gravityCellsPerSecond * 1_000.0).toLong().coerceAtLeast(1L)
+        }
+        val lockDelay = if (isGrounded()) lockDelayRemainingMillis.coerceAtLeast(1L) else Long.MAX_VALUE
+        val hardDropGuardDelay = hardDropGuardMillis.takeIf { it > 0L } ?: Long.MAX_VALUE
+
+        return minOf(gravityDelay, lockDelay, hardDropGuardDelay)
+            .coerceAtLeast(1L)
+    }
     val nextType: TetrominoType get() = upcomingQueue.first()
     val upcomingTypes: List<TetrominoType> get() = upcomingQueue.take(3)
 
