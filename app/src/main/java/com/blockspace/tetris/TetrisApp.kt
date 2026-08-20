@@ -918,7 +918,7 @@ private fun TetrisBoard(
     LaunchedEffect(lockRevision) {
         if (lockRevision == 0) return@LaunchedEffect
         lockPulse.snapTo(1f)
-        lockPulse.animateTo(0f, animationSpec = tween(durationMillis = 150, easing = FastOutSlowInEasing))
+        lockPulse.animateTo(0f, animationSpec = tween(durationMillis = 90, easing = FastOutSlowInEasing))
     }
     LaunchedEffect(clearRevision) {
         if (clearRevision == 0) return@LaunchedEffect
@@ -1003,12 +1003,13 @@ private fun TetrisBoard(
             drawRect(ActionGold.copy(alpha = hardDropFlash.value * 0.14f))
         }
         if (lockPulse.value > 0f) {
+            // 仅用细微蓝色边缘确认落地，避免白色大面积闪烁干扰棋盘可读性。
             drawRoundRect(
-                color = Color.White.copy(alpha = lockPulse.value * 0.16f),
-                topLeft = Offset(cell * 0.18f, cell * 0.18f),
-                size = Size(size.width - cell * 0.36f, size.height - cell * 0.36f),
-                cornerRadius = CornerRadius(cell * 0.35f),
-                style = Stroke(width = cell * (0.08f + lockPulse.value * 0.04f))
+                color = PanelStroke.copy(alpha = lockPulse.value * 0.32f),
+                topLeft = Offset(cell * 0.12f, cell * 0.12f),
+                size = Size(size.width - cell * 0.24f, size.height - cell * 0.24f),
+                cornerRadius = CornerRadius(cell * 0.26f),
+                style = Stroke(width = maxOf(1.5f, cell * 0.028f))
             )
         }
         if (clearFlash.value > 0f) {
