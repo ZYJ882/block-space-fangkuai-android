@@ -10,7 +10,7 @@ import org.junit.Test
 class CustomControlLayoutTest {
     private val geometry = ControlAreaGeometry(
         width = 360f,
-        height = 520f,
+        height = 132f,
         buttonWidth = 64f,
         buttonHeight = 58f,
         minimumGap = 8f
@@ -41,12 +41,12 @@ class CustomControlLayoutTest {
     @Test
     fun draggingBeyondBoundaryIsClampedToSafeRegion() {
         val layout = FreeControlLayout.standard()
-        val moved = layout.moveIfValid(ControlAction.HARD_DROP, PixelPoint(9999f, 9999f), geometry)
+        val moved = layout.moveIfValid(ControlAction.MOVE_LEFT, PixelPoint(-9999f, -9999f), geometry)
 
         assertNotNull(moved)
-        val rect = geometry.rect(moved!!.positionOf(ControlAction.HARD_DROP))
-        assertEquals(geometry.width, rect.right, 0.001f)
-        assertEquals(geometry.height, rect.bottom, 0.001f)
+        val rect = geometry.rect(moved!!.positionOf(ControlAction.MOVE_LEFT))
+        assertEquals(0f, rect.left, 0.001f)
+        assertEquals(0f, rect.top, 0.001f)
     }
 
     @Test

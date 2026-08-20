@@ -133,10 +133,10 @@ data class FreeControlLayout(val positions: Map<ControlAction, RelativeControlPo
     companion object {
         fun standard(): FreeControlLayout = FreeControlLayout(
             mapOf(
-                ControlAction.MOVE_LEFT to RelativeControlPosition(0f, 0.74f),
-                ControlAction.MOVE_RIGHT to RelativeControlPosition(0.30f, 0.74f),
+                ControlAction.MOVE_LEFT to RelativeControlPosition(0f, 0f),
+                ControlAction.MOVE_RIGHT to RelativeControlPosition(0.30f, 0f),
                 ControlAction.SOFT_DROP to RelativeControlPosition(0.15f, 1f),
-                ControlAction.ROTATE to RelativeControlPosition(1f, 0.74f),
+                ControlAction.ROTATE to RelativeControlPosition(1f, 0f),
                 ControlAction.HARD_DROP to RelativeControlPosition(1f, 1f)
             )
         )

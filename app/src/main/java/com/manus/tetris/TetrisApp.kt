@@ -349,8 +349,10 @@ private fun GameScreen(
 
         FreeTouchControls(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(start = 6.dp, end = 6.dp, top = 102.dp, bottom = 50.dp),
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(132.dp)
+                .padding(horizontal = 6.dp),
             gameOver = game.isGameOver,
             controlSettings = controlSettings,
             onMoveLeft = onMoveLeft,
@@ -359,18 +361,6 @@ private fun GameScreen(
             onSoftDrop = onSoftDrop,
             onHardDrop = onHardDrop
         )
-        Button(
-            onClick = onPause,
-            enabled = !game.isGameOver,
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .height(36.dp),
-            shape = RoundedCornerShape(14.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp, vertical = 0.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = PanelBlueLight, contentColor = Color.White)
-        ) {
-            Text(if (game.isPaused) "▶" else "Ⅱ", style = MaterialTheme.typography.titleMedium)
-        }
     }
 }
 
