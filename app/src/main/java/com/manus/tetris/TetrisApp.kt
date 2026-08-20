@@ -113,12 +113,18 @@ fun TetrisApp() {
     }
 
     LaunchedEffect(game, hasStarted) {
+        var previousFrameNanos = System.nanoTime()
         while (isActive) {
             if (hasStarted && !game.isPaused && !game.isGameOver) {
-                delay(game.fallDelayMillis)
-                game.tick()
+                delay(16)
+                val nowNanos = System.nanoTime()
+                val elapsedMillis = ((nowNanos - previousFrameNanos) / 1_000_000L)
+                    .coerceIn(1L, 100L)
+                previousFrameNanos = nowNanos
+                game.advanceTime(elapsedMillis)
                 revision++
             } else {
+                previousFrameNanos = System.nanoTime()
                 delay(100)
             }
         }

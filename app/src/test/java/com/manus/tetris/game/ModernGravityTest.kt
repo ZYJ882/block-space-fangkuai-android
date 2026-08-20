@@ -1,0 +1,61 @@
+package com.manus.tetris.game
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import kotlin.random.Random
+
+class ModernGravityTest {
+    @Test
+    fun marathonCurveMatchesExpectedEarlyAndMidLevelPacing() {
+        assertEquals(1, ModernGravity.levelForLines(0))
+        assertEquals(5, ModernGravity.levelForLines(40))
+        assertEquals(15, ModernGravity.levelForLines(140))
+        assertEquals(15, ModernGravity.levelForLines(999))
+
+        assertEquals(1_000L, ModernGravity.nominalCellIntervalMillis(1))
+        assertTrue(ModernGravity.nominalCellIntervalMillis(5) in 350L..360L)
+        assertTrue(ModernGravity.nominalCellIntervalMillis(10) in 60L..70L)
+    }
+
+    @Test
+    fun highGravityStageSupportsFasterThanOneCellPerFrame() {
+        assertTrue(ModernGravity.gravityG(13) < 1.0)
+        assertTrue(ModernGravity.gravityG(14) > 1.0)
+        assertTrue(ModernGravity.nominalCellIntervalMillis(14) <= 12L)
+        assertTrue(ModernGravity.cellsPerSecond(15) > 100.0)
+    }
+
+    @Test
+    fun automaticGravityMovesWithoutAwardingDropPoints() {
+        val game = TetrisGame(Random(7))
+        val startRow = game.activePiece!!.row
+
+        game.advanceTime(1_000L)
+
+        assertEquals(startRow + 1, game.activePiece!!.row)
+        assertEquals(0, game.score)
+    }
+
+    @Test
+    fun groundedSoftDropReceivesFullLockDelayBeforeLocking() {
+        val game = TetrisGame(Random(11))
+        while (game.softDrop()) Unit
+        val groundedPiece = game.activePiece!!
+
+        game.advanceTime(499L)
+        assertEquals(groundedPiece, game.activePiece)
+
+        game.advanceTime(1L)
+        assertEquals(0, game.activePiece!!.row)
+    }
+
+    @Test
+    fun lockDelayAndMoveResetLimitsFollowModernRules() {
+        assertFalse(ModernGravity.shouldLock(499.0))
+        assertTrue(ModernGravity.shouldLock(500.0))
+        assertTrue(ModernGravity.canResetLock(14))
+        assertFalse(ModernGravity.canResetLock(15))
+    }
+}

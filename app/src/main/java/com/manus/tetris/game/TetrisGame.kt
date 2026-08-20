@@ -1,7 +1,8 @@
 package com.manus.tetris.game
 
-import kotlin.math.max
+import kotlin.math.ceil
 import kotlin.math.min
+import kotlin.math.pow
 import kotlin.random.Random
 
 enum class TetrominoType(val color: Long) {
@@ -71,6 +72,37 @@ object ModernScoring {
     }
 }
 
+/**
+ * 现代 Marathon（Tetris Worlds / Guideline）重力模型。
+ * 采用每级 10 行、最高第 15 级的曲线；无尽游戏在 15 级保持最高普通模式重力。
+ */
+object ModernGravity {
+    const val LINES_PER_LEVEL = 10
+    const val MAX_LEVEL = 15
+    const val TARGET_FRAME_RATE = 60.0
+    const val LOCK_DELAY_MILLIS = 500L
+    const val MAX_LOCK_RESETS = 15
+
+    fun levelForLines(lines: Int): Int = (lines / LINES_PER_LEVEL + 1).coerceAtMost(MAX_LEVEL)
+
+    fun gravityG(level: Int): Double {
+        val boundedLevel = level.coerceIn(1, MAX_LEVEL)
+        val base = 0.8 - ((boundedLevel - 1) * 0.007)
+        val secondsPerCell = base.pow(boundedLevel - 1)
+        return 1.0 / (secondsPerCell * TARGET_FRAME_RATE)
+    }
+
+    fun cellsPerSecond(level: Int): Double = gravityG(level) * TARGET_FRAME_RATE
+
+    fun nominalCellIntervalMillis(level: Int): Long = ceil(1000.0 / cellsPerSecond(level))
+        .toLong()
+        .coerceAtLeast(1L)
+
+    fun shouldLock(elapsedMillis: Double): Boolean = elapsedMillis >= LOCK_DELAY_MILLIS
+
+    fun canResetLock(resetCount: Int): Boolean = resetCount < MAX_LOCK_RESETS
+}
+
 object PieceLibrary {
     private val shapes: Map<TetrominoType, Array<Array<Pair<Int, Int>>>> = mapOf(
         TetrominoType.I to arrayOf(
@@ -134,6 +166,9 @@ class TetrisGame(private val random: Random = Random.Default) {
     private val upcomingQueue = ArrayDeque<TetrominoType>()
     private var lastActionWasRotation = false
     private var consecutiveClears = 0
+    private var gravityProgressCells = 0.0
+    private var lockDelayElapsedMillis = 0.0
+    private var lockResetCount = 0
 
     var score: Int = 0
         private set
@@ -150,8 +185,12 @@ class TetrisGame(private val random: Random = Random.Default) {
     var lastScoreEvent: ScoreEvent? = null
         private set
 
-    val level: Int get() = lines / 10 + 1
-    val fallDelayMillis: Long get() = max(120, 820 - (level - 1) * 65).toLong()
+    val level: Int get() = ModernGravity.levelForLines(lines)
+    val fallDelayMillis: Long get() = ModernGravity.nominalCellIntervalMillis(level)
+    val gravityCellsPerSecond: Double get() = ModernGravity.cellsPerSecond(level)
+    val lockDelayRemainingMillis: Long get() = ceil(
+        (ModernGravity.LOCK_DELAY_MILLIS - lockDelayElapsedMillis).coerceAtLeast(0.0)
+    ).toLong()
     val activePiece: FallingPiece? get() = active
     val nextType: TetrominoType get() = upcomingQueue.first()
     val upcomingTypes: List<TetrominoType> get() = upcomingQueue.take(3)
@@ -171,6 +210,7 @@ class TetrisGame(private val random: Random = Random.Default) {
         isBackToBack = false
         lastScoreEvent = null
         lastActionWasRotation = false
+        resetPieceTiming()
         isPaused = false
         isGameOver = false
         upcomingQueue.clear()
@@ -195,6 +235,7 @@ class TetrisGame(private val random: Random = Random.Default) {
             if (canPlace(kicked)) {
                 active = kicked
                 lastActionWasRotation = true
+                afterGroundedManipulation()
                 return true
             }
         }
@@ -206,11 +247,13 @@ class TetrisGame(private val random: Random = Random.Default) {
         val moved = active!!.moved(rowDelta = 1)
         return if (canPlace(moved)) {
             active = moved
+            gravityProgressCells = 0.0
+            lockDelayElapsedMillis = 0.0
             lastActionWasRotation = false
             score += 1
             true
         } else {
-            lockPiece()
+            // 现代 SRS 风格软降在落地时不立即锁定；锁定延迟由 advanceTime 统一处理。
             false
         }
     }
@@ -227,16 +270,36 @@ class TetrisGame(private val random: Random = Random.Default) {
         lockPiece()
     }
 
-    fun tick() {
-        if (!canControl()) return
-        val moved = active!!.moved(rowDelta = 1)
-        if (canPlace(moved)) {
-            active = moved
-            lastActionWasRotation = false
-        } else {
-            lockPiece()
+    /**
+     * 按真实经过的时间推进游戏。累积小数格重力可准确支持超过 1G 的高等级速度。
+     */
+    fun advanceTime(deltaMillis: Long) {
+        if (!canControl() || deltaMillis <= 0L) return
+
+        if (isGrounded()) {
+            advanceLockDelay(deltaMillis)
+            return
+        }
+
+        gravityProgressCells += gravityCellsPerSecond * deltaMillis / 1000.0
+        val wholeCells = gravityProgressCells.toInt()
+        if (wholeCells <= 0) return
+        gravityProgressCells -= wholeCells
+
+        repeat(wholeCells) {
+            val moved = active!!.moved(rowDelta = 1)
+            if (canPlace(moved)) {
+                active = moved
+                lastActionWasRotation = false
+            } else {
+                advanceLockDelay(deltaMillis)
+                return
+            }
         }
     }
+
+    /** 保留给兼容调用方的单步推进入口。 */
+    fun tick() = advanceTime(fallDelayMillis)
 
     fun ghostPiece(): FallingPiece? {
         val piece = active ?: return null
@@ -251,6 +314,7 @@ class TetrisGame(private val random: Random = Random.Default) {
         return if (canPlace(candidate)) {
             active = candidate
             lastActionWasRotation = false
+            if (rowDelta == 0 && columnDelta != 0) afterGroundedManipulation()
             true
         } else {
             false
@@ -270,6 +334,7 @@ class TetrisGame(private val random: Random = Random.Default) {
         val perfectClear = cleared > 0 && cells.all { row -> row.all { it == EMPTY } }
         applyScoring(cleared, tSpin, perfectClear)
         lastActionWasRotation = false
+        resetPieceTiming()
         spawnPiece()
     }
 
@@ -378,11 +443,38 @@ class TetrisGame(private val random: Random = Random.Default) {
         val candidate = FallingPiece(type, rotation = 0, row = 0, column = SPAWN_COLUMN)
         if (canPlace(candidate)) {
             active = candidate
+            resetPieceTiming()
         } else {
             active = null
             isGameOver = true
             isPaused = false
         }
+    }
+
+    private fun isGrounded(): Boolean = active?.let { piece ->
+        !canPlace(piece.moved(rowDelta = 1))
+    } ?: false
+
+    private fun advanceLockDelay(deltaMillis: Long) {
+        lockDelayElapsedMillis += deltaMillis
+        if (ModernGravity.shouldLock(lockDelayElapsedMillis)) lockPiece()
+    }
+
+    private fun afterGroundedManipulation() {
+        if (!isGrounded()) {
+            lockDelayElapsedMillis = 0.0
+            return
+        }
+        if (ModernGravity.canResetLock(lockResetCount)) {
+            lockDelayElapsedMillis = 0.0
+            lockResetCount++
+        }
+    }
+
+    private fun resetPieceTiming() {
+        gravityProgressCells = 0.0
+        lockDelayElapsedMillis = 0.0
+        lockResetCount = 0
     }
 
     private fun canControl(): Boolean = active != null && !isPaused && !isGameOver
