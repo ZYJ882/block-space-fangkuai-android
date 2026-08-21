@@ -220,6 +220,8 @@ class TetrisGame(private val random: Random = Random.Default) {
         const val ROWS = 20
         const val COLUMNS = 10
         private const val EMPTY = 0
+        /** 局域网对战攻击产生的垃圾行单元，区别于七种可操作方块。 */
+        const val GARBAGE_CELL = 8
         private const val SPAWN_COLUMN = 3
         const val NO_PENDING_EVENT_MILLIS = 1_000L
     }
@@ -306,6 +308,33 @@ class TetrisGame(private val random: Random = Random.Default) {
     }
 
     fun board(): Array<IntArray> = Array(ROWS) { cells[it].copyOf() }
+
+    /**
+     * 应用对手攻击产生的垃圾行。每一行保留一个可通过的缺口；若顶行被挤出，或当前方块
+     * 与新棋盘重叠，则本局结束。调用方应在返回 true 时更新界面修订号。
+     */
+    fun applyGarbage(lines: Int): Boolean {
+        val count = lines.coerceIn(0, ROWS)
+        if (count == 0 || isGameOver) return false
+        repeat(count) { index ->
+            if (cells[0].any { it != EMPTY }) {
+                active = null
+                isGameOver = true
+                isPaused = false
+                return true
+            }
+            for (row in 0 until ROWS - 1) cells[row + 1].copyInto(cells[row])
+            val hole = (lockRevision + index) % COLUMNS
+            cells[ROWS - 1].fill(GARBAGE_CELL)
+            cells[ROWS - 1][hole] = EMPTY
+        }
+        if (active?.let { !canPlace(it) } == true) {
+            active = null
+            isGameOver = true
+            isPaused = false
+        }
+        return true
+    }
 
     fun startNewGame() {
         cells.forEach { it.fill(EMPTY) }

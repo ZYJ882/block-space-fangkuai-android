@@ -43,6 +43,7 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -85,6 +86,11 @@ import com.blockspace.tetris.controls.HandlingSettings
 import com.blockspace.tetris.audio.GameSoundEffect
 import com.blockspace.tetris.audio.GameSoundPlayer
 import com.blockspace.tetris.game.FallingPiece
+import com.blockspace.tetris.network.LanLobbyScreen
+import com.blockspace.tetris.network.LanMultiplayerManager
+import com.blockspace.tetris.network.LanStatus
+import com.blockspace.tetris.network.OpponentPanel
+import com.blockspace.tetris.network.OpponentSnapshot
 import com.blockspace.tetris.game.PieceLibrary
 import com.blockspace.tetris.game.TetrisGame
 import com.blockspace.tetris.game.TetrominoType
@@ -122,12 +128,20 @@ fun TetrisApp() {
     var revision by remember { mutableIntStateOf(0) }
     var timingRevision by remember { mutableIntStateOf(0) }
     var hasStarted by rememberSaveable { mutableStateOf(false) }
+    var showLanLobby by rememberSaveable { mutableStateOf(false) }
+    var lanMatchStarted by rememberSaveable { mutableStateOf(false) }
     var showControlSettings by rememberSaveable { mutableStateOf(false) }
+    val lanManager = remember(context) { LanMultiplayerManager(context.applicationContext) }
+    val lanState by lanManager.uiState.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
     var appIsActive by remember { mutableStateOf(true) }
 
     DisposableEffect(soundPlayer) {
         onDispose { soundPlayer.release() }
+    }
+
+    DisposableEffect(lanManager) {
+        onDispose { lanManager.release() }
     }
 
     LaunchedEffect(soundPlayer, controlSettings.soundEffectsEnabled) {
@@ -184,8 +198,18 @@ fun TetrisApp() {
         game.setPieceRandomizerMode(controlSettings.pieceRandomizer)
     }
 
-    LaunchedEffect(game, hasStarted, appIsActive, timingRevision) {
-        if (!hasStarted || !appIsActive || game.isPaused || game.isGameOver) return@LaunchedEffect
+    LaunchedEffect(game, hasStarted, appIsActive, timingRevision, lanState.status, lanState.pendingGarbageLines) {
+        if (!hasStarted || !appIsActive || game.isPaused || game.isGameOver ||
+            (showLanLobby && lanState.status != LanStatus.CONNECTED)
+        ) return@LaunchedEffect
+
+        val pendingGarbage = lanManager.consumePendingGarbage()
+        if (pendingGarbage > 0 && game.applyGarbage(pendingGarbage)) {
+            lanManager.publishGame(game)
+            revision++
+            timingRevision++
+            return@LaunchedEffect
+        }
 
         val wakeDelayMillis = game.nextRuleEventDelayMillis()
         val startedAtNanos = System.nanoTime()
@@ -194,6 +218,7 @@ fun TetrisApp() {
             .coerceAtLeast(1L)
 
         if (game.advanceTime(elapsedMillis)) {
+            lanManager.publishGame(game)
             revision++
         }
         // 规则事件到期、输入或状态切换后重新计算最近的到期时间。
@@ -201,29 +226,68 @@ fun TetrisApp() {
     }
 
     fun updateGame(action: () -> Boolean) {
-        if (!action()) return
+        val pendingGarbage = lanManager.consumePendingGarbage()
+        val garbageApplied = pendingGarbage > 0 && game.applyGarbage(pendingGarbage)
+        val actionApplied = if (game.isGameOver) false else action()
+        if (!garbageApplied && !actionApplied) return
+        lanManager.publishGame(game)
         revision++
         // 仅在规则状态实际改变时取消旧等待并重新安排，避免边界输入造成无效重组。
         timingRevision++
     }
 
-    if (!hasStarted) {
-        StartScreen(
-            onStart = {
-                updateGame {
-                    game.setPieceRandomizerMode(controlSettings.pieceRandomizer)
-                    game.startNewGame()
-                    soundPlayer.play(GameSoundEffect.START)
-                    true
-                }
-                hasStarted = true
+    LaunchedEffect(showLanLobby, lanState.status, lanMatchStarted) {
+        if (showLanLobby && lanState.status == LanStatus.CONNECTED && !lanMatchStarted) {
+            updateGame {
+                game.setPieceRandomizerMode(controlSettings.pieceRandomizer)
+                game.startNewGame()
+                soundPlayer.play(GameSoundEffect.START)
+                true
             }
-        )
-    } else {
-        Box(modifier = Modifier.fillMaxSize()) {
-            GameScreen(
+            hasStarted = true
+            lanMatchStarted = true
+        }
+    }
+
+    when {
+        showLanLobby && lanState.status != LanStatus.CONNECTED -> {
+            LanLobbyScreen(
+                state = lanState,
+                onCreateRoom = { lanManager.hostRoom("PLAYER") },
+                onRefresh = { lanManager.startDiscovery() },
+                onJoinRoom = lanManager::joinRoom,
+                onBack = {
+                    lanManager.close()
+                    showLanLobby = false
+                    lanMatchStarted = false
+                }
+            )
+        }
+        !hasStarted -> {
+            StartScreen(
+                onStart = {
+                    updateGame {
+                        game.setPieceRandomizerMode(controlSettings.pieceRandomizer)
+                        game.startNewGame()
+                        soundPlayer.play(GameSoundEffect.START)
+                        true
+                    }
+                    hasStarted = true
+                },
+                onLanBattle = {
+                    lanMatchStarted = false
+                    showLanLobby = true
+                    lanManager.startDiscovery()
+                }
+            )
+        }
+        else -> {
+            Box(modifier = Modifier.fillMaxSize()) {
+                GameScreen(
                 game = game,
                 revision = revision,
+                isLanBattle = showLanLobby && lanMatchStarted && lanState.status == LanStatus.CONNECTED,
+                opponent = lanState.opponent,
                 onMoveLeft = {
                     updateGame {
                         game.moveLeft().also { if (it) soundPlayer.play(GameSoundEffect.MOVE) }
@@ -277,14 +341,25 @@ fun TetrisApp() {
                         true
                     }
                     showControlSettings = true
+                },
+                onOpenLanBattle = {
+                    if (!game.isPaused) updateGame {
+                        game.togglePause()
+                        true
+                    }
+                    lanManager.close()
+                    lanMatchStarted = false
+                    showLanLobby = true
+                    lanManager.startDiscovery()
                 }
             )
+            }
         }
     }
 }
 
 @Composable
-private fun StartScreen(onStart: () -> Unit) {
+private fun StartScreen(onStart: () -> Unit, onLanBattle: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -326,7 +401,15 @@ private fun StartScreen(onStart: () -> Unit) {
                     shape = RoundedCornerShape(18.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = ActionGold, contentColor = Color.White)
                 ) {
-                    Text("开始游戏", style = MaterialTheme.typography.titleMedium)
+                    Text("开始单人游戏", style = MaterialTheme.typography.titleMedium)
+                }
+                Button(
+                    onClick = onLanBattle,
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(18.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = ActionBlue, contentColor = Color.White)
+                ) {
+                    Text("局域网联机对战", style = MaterialTheme.typography.titleMedium)
                 }
             }
         }
@@ -355,6 +438,8 @@ private fun StartMark() {
 private fun GameScreen(
     game: TetrisGame,
     revision: Int,
+    isLanBattle: Boolean,
+    opponent: OpponentSnapshot?,
     onMoveLeft: () -> Unit,
     onMoveRight: () -> Unit,
     onRotate: () -> Unit,
@@ -366,7 +451,8 @@ private fun GameScreen(
     isEditingControls: Boolean,
     onControlSettingsChange: (ControlSettings) -> Unit,
     onFinishControlEditing: () -> Unit,
-    onOpenControlSettings: () -> Unit
+    onOpenControlSettings: () -> Unit,
+    onOpenLanBattle: () -> Unit
 ) {
     val board = remember(revision) { game.board() }
     val activePiece = remember(revision) { game.activePiece }
@@ -390,7 +476,8 @@ private fun GameScreen(
                 paused = game.isPaused,
                 onPause = onPause,
                 onRestart = onRestart,
-                onOpenControlSettings = onOpenControlSettings
+                onOpenControlSettings = onOpenControlSettings,
+                onOpenLanBattle = onOpenLanBattle
             )
             Spacer(Modifier.height(4.dp))
             ScoreBanner(
@@ -410,13 +497,15 @@ private fun GameScreen(
                     .padding(bottom = 128.dp),
                 contentAlignment = Alignment.Center
             ) {
-                val sideInfoWidth = 54.dp
-                val previewWidth = 62.dp
-                val sectionGap = 5.dp
-                val widestBoard = maxWidth - sideInfoWidth - previewWidth - sectionGap * 2
+                val sideInfoWidth = if (isLanBattle) 42.dp else 54.dp
+                val previewWidth = if (isLanBattle) 44.dp else 62.dp
+                val opponentWidth = if (isLanBattle) 72.dp else 0.dp
+                val sectionGap = 4.dp
+                val gapCount = if (isLanBattle) 3 else 2
+                val widestBoard = maxWidth - sideInfoWidth - previewWidth - opponentWidth - sectionGap * gapCount
                 val boardHeight = minOf(widestBoard * 2f, maxHeight)
                 val boardWidth = boardHeight / 2f
-                val playAreaWidth = boardWidth + sideInfoWidth + previewWidth + sectionGap * 2
+                val playAreaWidth = boardWidth + sideInfoWidth + previewWidth + opponentWidth + sectionGap * gapCount
 
                 Row(
                     modifier = Modifier
@@ -468,6 +557,14 @@ private fun GameScreen(
                             .width(previewWidth)
                             .fillMaxHeight()
                     )
+                    if (isLanBattle) {
+                        OpponentPanel(
+                            snapshot = opponent,
+                            modifier = Modifier
+                                .width(opponentWidth)
+                                .fillMaxHeight()
+                        )
+                    }
                 }
             }
         }
@@ -791,7 +888,8 @@ private fun GameTopBar(
     paused: Boolean,
     onPause: () -> Unit,
     onRestart: () -> Unit,
-    onOpenControlSettings: () -> Unit
+    onOpenControlSettings: () -> Unit,
+    onOpenLanBattle: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -825,6 +923,7 @@ private fun GameTopBar(
             }
         }
         HeaderAction(if (paused) "▶" else "Ⅱ", onPause)
+        HeaderAction("⌁", onOpenLanBattle)
         HeaderAction("↺", onRestart)
         HeaderAction("⚙", onOpenControlSettings)
     }
@@ -1114,7 +1213,7 @@ private fun TetrisBoard(
             columns.forEachIndexed { column, value ->
                 if (value != 0) {
                     drawBlock(
-                        color = Color(TetrominoType.entries[value - 1].color),
+                        color = if (value == TetrisGame.GARBAGE_CELL) Color(0xFF64748B) else Color(TetrominoType.entries[value - 1].color),
                         left = column * cell,
                         top = row * cell,
                         side = cell
