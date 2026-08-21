@@ -79,6 +79,7 @@ import com.blockspace.tetris.controls.ControlSettingsStore
 import com.blockspace.tetris.controls.FallSpeedPreset
 import com.blockspace.tetris.controls.FreeControlLayout
 import com.blockspace.tetris.controls.PixelPoint
+import com.blockspace.tetris.controls.PieceRandomizerMode
 import com.blockspace.tetris.controls.HandlingPreset
 import com.blockspace.tetris.controls.HandlingSettings
 import com.blockspace.tetris.game.FallingPiece
@@ -142,13 +143,15 @@ fun TetrisApp() {
 
     fun updateControlSettings(next: ControlSettings) {
         game.setFallSpeed(next.fallSpeed)
+        game.setPieceRandomizerMode(next.pieceRandomizer)
         controlSettings = next
         controlSettingsStore.save(next)
         timingRevision++
     }
 
-    LaunchedEffect(game, controlSettings.fallSpeed) {
+    LaunchedEffect(game, controlSettings.fallSpeed, controlSettings.pieceRandomizer) {
         game.setFallSpeed(controlSettings.fallSpeed)
+        game.setPieceRandomizerMode(controlSettings.pieceRandomizer)
     }
 
     LaunchedEffect(game, hasStarted, appIsActive, timingRevision) {
@@ -177,7 +180,10 @@ fun TetrisApp() {
     if (!hasStarted) {
         StartScreen(
             onStart = {
-                updateGame { game.startNewGame() }
+                updateGame {
+                    game.setPieceRandomizerMode(controlSettings.pieceRandomizer)
+                    game.startNewGame()
+                }
                 hasStarted = true
             }
         )
@@ -444,7 +450,9 @@ private fun FullScreenControlEditorToolbar(
         shape = RoundedCornerShape(18.dp)
     ) {
         Column(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            modifier = Modifier
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
@@ -546,13 +554,49 @@ private fun FullScreenControlEditorToolbar(
                 )
             }
 
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("③ 方块刷新逻辑", style = MaterialTheme.typography.labelLarge, color = Color(0xFFBFE8FF))
+                Text(
+                    "选择会立即保存，并从下一局开始生效；不会改写当前对局已生成的预览队列。",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color(0xFFD5ECFF)
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    PieceRandomizerMode.entries.forEach { mode ->
+                        Button(
+                            onClick = { onSettingsChange(settings.applyPieceRandomizer(mode)) },
+                            modifier = Modifier.weight(1f).height(38.dp),
+                            shape = RoundedCornerShape(11.dp),
+                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (settings.pieceRandomizer == mode) ActionPurple else PanelBlueLight,
+                                contentColor = Color.White
+                            )
+                        ) {
+                            Text(mode.label, style = MaterialTheme.typography.labelLarge)
+                        }
+                    }
+                }
+                Text(
+                    when (settings.pieceRandomizer) {
+                        PieceRandomizerMode.SEVEN_BAG -> "7-Bag：每一袋恰好包含七种方块各一个，适合公平挑战与提前规划，不会长期缺少某一种。"
+                        PieceRandomizerMode.TRUE_RANDOM -> "真随机：每次独立等概率抽取，可能连续出现相同方块，也可能长时间不出现某一种。"
+                    },
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color(0xFFFFD38A)
+                )
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("③ 键位位置", style = MaterialTheme.typography.labelLarge, color = Color(0xFFBFE8FF))
+                    Text("④ 键位位置", style = MaterialTheme.typography.labelLarge, color = Color(0xFFBFE8FF))
                     Text("直接拖动下方真实按键即可调整位置。", style = MaterialTheme.typography.labelLarge, color = Color(0xFFD5ECFF))
                 }
                 Button(

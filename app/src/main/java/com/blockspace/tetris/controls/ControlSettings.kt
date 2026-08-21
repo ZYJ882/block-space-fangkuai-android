@@ -68,6 +68,22 @@ enum class FallSpeedPreset(
     }
 }
 
+/**
+ * 方块刷新模式。标准 7-Bag 适合公平竞赛和规划；真随机保留传统独立抽取体验。
+ */
+enum class PieceRandomizerMode(
+    val label: String,
+    val description: String
+) {
+    SEVEN_BAG("7-Bag", "每袋七种方块各一个，洗牌后依次发放"),
+    TRUE_RANDOM("真随机", "每次独立等概率抽取，允许重复和长时间缺块");
+
+    companion object {
+        fun fromName(value: String?): PieceRandomizerMode =
+            entries.firstOrNull { it.name == value } ?: SEVEN_BAG
+    }
+}
+
 enum class ControlAction(val label: String, val symbol: String) {
     MOVE_LEFT("左移", "←"),
     MOVE_RIGHT("右移", "→"),
@@ -212,6 +228,7 @@ data class ControlSettings(
     val preset: HandlingPreset = HandlingPreset.COMFORT,
     val handling: HandlingSettings = HandlingSettings.fromPreset(HandlingPreset.COMFORT),
     val fallSpeed: FallSpeedPreset = FallSpeedPreset.STANDARD,
+    val pieceRandomizer: PieceRandomizerMode = PieceRandomizerMode.SEVEN_BAG,
     val layout: FreeControlLayout = FreeControlLayout.standard()
 ) {
     fun applyPreset(preset: HandlingPreset): ControlSettings = copy(
@@ -225,6 +242,8 @@ data class ControlSettings(
     )
 
     fun applyFallSpeed(fallSpeed: FallSpeedPreset): ControlSettings = copy(fallSpeed = fallSpeed)
+
+    fun applyPieceRandomizer(mode: PieceRandomizerMode): ControlSettings = copy(pieceRandomizer = mode)
 }
 
 class ControlSettingsStore(context: Context) {
@@ -239,6 +258,7 @@ class ControlSettingsStore(context: Context) {
         return ControlSettings(
             preset = preset,
             fallSpeed = FallSpeedPreset.fromName(preferences.getString(KEY_FALL_SPEED, null)),
+            pieceRandomizer = PieceRandomizerMode.fromName(preferences.getString(KEY_PIECE_RANDOMIZER, null)),
             handling = HandlingSettings.clamp(
                 preferences.getLong(KEY_DAS, defaultHandling.dasMillis),
                 preferences.getLong(KEY_ARR, defaultHandling.arrMillis)
@@ -256,6 +276,7 @@ class ControlSettingsStore(context: Context) {
             .putLong(KEY_DAS, settings.handling.dasMillis)
             .putLong(KEY_ARR, settings.handling.arrMillis)
             .putString(KEY_FALL_SPEED, settings.fallSpeed.name)
+            .putString(KEY_PIECE_RANDOMIZER, settings.pieceRandomizer.name)
             .putString(KEY_LAYOUT, settings.layout.encode())
             .apply()
     }
@@ -265,6 +286,7 @@ class ControlSettingsStore(context: Context) {
         const val KEY_DAS = "handling_das_ms"
         const val KEY_ARR = "handling_arr_ms"
         const val KEY_FALL_SPEED = "fall_speed_preset"
+        const val KEY_PIECE_RANDOMIZER = "piece_randomizer_mode"
         const val KEY_LAYOUT = "free_layout"
     }
 }

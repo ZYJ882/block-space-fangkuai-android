@@ -1,6 +1,7 @@
 package com.blockspace.tetris.game
 
 import com.blockspace.tetris.controls.FallSpeedPreset
+import com.blockspace.tetris.controls.PieceRandomizerMode
 import kotlin.math.ceil
 import kotlin.math.min
 import kotlin.math.pow
@@ -189,7 +190,7 @@ object PieceLibrary {
         shapes.getValue(type)[rotation % 4]
 }
 
-class TetrisGame(random: Random = Random.Default) {
+class TetrisGame(private val random: Random = Random.Default) {
     companion object {
         const val ROWS = 20
         const val COLUMNS = 10
@@ -200,6 +201,7 @@ class TetrisGame(random: Random = Random.Default) {
 
     private val cells = Array(ROWS) { IntArray(COLUMNS) { EMPTY } }
     private val pieceGenerator = SevenBagGenerator(random)
+    private var activeRandomizerMode = PieceRandomizerMode.SEVEN_BAG
     private var active: FallingPiece? = null
     private val upcomingQueue = ArrayDeque<TetrominoType>()
     private var lastActionWasRotation = false
@@ -233,6 +235,11 @@ class TetrisGame(random: Random = Random.Default) {
         private set
     var fallSpeedPreset: FallSpeedPreset = FallSpeedPreset.STANDARD
         private set
+    /** 玩家在设置中选择的模式；修改后从下一局开始应用。 */
+    var pieceRandomizerMode: PieceRandomizerMode = PieceRandomizerMode.SEVEN_BAG
+        private set
+    /** 当前对局实际使用的模式，便于界面和测试确认“下一局生效”的边界。 */
+    val activeGameRandomizerMode: PieceRandomizerMode get() = activeRandomizerMode
 
     val level: Int get() = ModernGravity.levelForLines(lines)
     val fallDelayMillis: Long get() = ceil(
@@ -291,9 +298,11 @@ class TetrisGame(random: Random = Random.Default) {
         resetPieceTiming()
         isPaused = false
         isGameOver = false
+        // 仅在开局固定实际生成器，避免设置变更打断当前对局的预览和出块序列。
+        activeRandomizerMode = pieceRandomizerMode
         pieceGenerator.reset()
         upcomingQueue.clear()
-        repeat(4) { upcomingQueue.addLast(pieceGenerator.next()) }
+        repeat(4) { upcomingQueue.addLast(nextPieceType()) }
         spawnPiece(guardHardDrop = false)
     }
 
@@ -303,6 +312,11 @@ class TetrisGame(random: Random = Random.Default) {
 
     fun setFallSpeed(preset: FallSpeedPreset) {
         fallSpeedPreset = preset
+    }
+
+    /** 仅记录玩家选择；当前局的实际随机逻辑会在下次 startNewGame() 固定。 */
+    fun setPieceRandomizerMode(mode: PieceRandomizerMode) {
+        pieceRandomizerMode = mode
     }
 
     fun moveLeft(): Boolean = tryMove(columnDelta = -1)
@@ -535,7 +549,7 @@ class TetrisGame(random: Random = Random.Default) {
 
     private fun spawnPiece(guardHardDrop: Boolean) {
         val type = upcomingQueue.removeFirst()
-        upcomingQueue.addLast(pieceGenerator.next())
+        upcomingQueue.addLast(nextPieceType())
         val candidate = FallingPiece(type, rotation = 0, row = 0, column = SPAWN_COLUMN)
         if (canPlace(candidate)) {
             active = candidate
@@ -551,6 +565,14 @@ class TetrisGame(random: Random = Random.Default) {
             isPaused = false
         }
     }
+
+    private fun nextPieceType(): TetrominoType = when (activeRandomizerMode) {
+        PieceRandomizerMode.SEVEN_BAG -> pieceGenerator.next()
+        PieceRandomizerMode.TRUE_RANDOM -> randomType()
+    }
+
+    /** 真随机：每一块都独立、等概率地从七种方块中抽取。 */
+    private fun randomType(): TetrominoType = TetrominoType.entries[random.nextInt(TetrominoType.entries.size)]
 
     private fun isGrounded(): Boolean = active?.let { piece ->
         !canPlace(piece.moved(rowDelta = 1))
