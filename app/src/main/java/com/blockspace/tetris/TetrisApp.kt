@@ -84,6 +84,7 @@ import com.blockspace.tetris.controls.HandlingPreset
 import com.blockspace.tetris.controls.HandlingSettings
 import com.blockspace.tetris.audio.GameSoundEffect
 import com.blockspace.tetris.audio.GameSoundPlayer
+import com.blockspace.tetris.game.Block
 import com.blockspace.tetris.game.FallingPiece
 import com.blockspace.tetris.game.PieceLibrary
 import com.blockspace.tetris.game.TetrisGame
@@ -1088,7 +1089,8 @@ private fun TetrisBoard(
             }
         }
 
-        ghostPiece?.blocks()?.forEach { block ->
+        val blockBuffer = ArrayList<Block>(4)
+        ghostPiece?.blocks(blockBuffer)?.forEach { block ->
             if (block.row in 0 until TetrisGame.ROWS && block.column in 0 until TetrisGame.COLUMNS) {
                 drawBlockOutline(
                     color = GhostColor,
@@ -1099,7 +1101,7 @@ private fun TetrisBoard(
             }
         }
 
-        activePiece?.blocks()?.forEach { block ->
+        activePiece?.blocks(blockBuffer)?.forEach { block ->
             if (block.row in 0 until TetrisGame.ROWS && block.column in 0 until TetrisGame.COLUMNS) {
                 val offsetRow = visualRow.value - activePiece.row
                 val offsetColumn = visualColumn.value - activePiece.column

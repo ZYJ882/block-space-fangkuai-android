@@ -49,8 +49,30 @@ data class FallingPiece(
     val row: Int,
     val column: Int
 ) {
-    fun blocks(): List<Block> = PieceLibrary.blocks(type, rotation).map { (x, y) ->
-        Block(row + y, column + x)
+    /** 可复用调用方提供的列表，减少频繁渲染时的列表分配。 */
+    fun blocks(output: MutableList<Block> = mutableListOf()): List<Block> {
+        output.clear()
+        val shape = PieceLibrary.blocks(type, rotation)
+        for (i in shape.indices) {
+            val (x, y) = shape[i]
+            output.add(Block(row + y, column + x))
+        }
+        return output
+    }
+
+    /** 直接遍历形状坐标执行碰撞检测，避免为规则判断创建 Block 对象。 */
+    fun overlaps(board: Array<IntArray>, rowOffset: Int = 0, columnOffset: Int = 0): Boolean {
+        val shape = PieceLibrary.blocks(type, rotation)
+        for (i in shape.indices) {
+            val (x, y) = shape[i]
+            val boardRow = row + y + rowOffset
+            val boardColumn = column + x + columnOffset
+            if (boardRow !in 0 until TetrisGame.ROWS || boardColumn !in 0 until TetrisGame.COLUMNS ||
+                board[boardRow][boardColumn] != 0) {
+                return true
+            }
+        }
+        return false
     }
 
     fun moved(rowDelta: Int = 0, columnDelta: Int = 0): FallingPiece =
@@ -422,9 +444,13 @@ class TetrisGame(private val random: Random = Random.Default) {
     private fun lockPiece() {
         val lockedPiece = active ?: return
         val tSpin = isTSpin(lockedPiece)
-        lockedPiece.blocks().forEach { block ->
-            if (block.row in 0 until ROWS && block.column in 0 until COLUMNS) {
-                cells[block.row][block.column] = lockedPiece.type.ordinal + 1
+        val shape = PieceLibrary.blocks(lockedPiece.type, lockedPiece.rotation)
+        for (i in shape.indices) {
+            val (x, y) = shape[i]
+            val boardRow = lockedPiece.row + y
+            val boardColumn = lockedPiece.column + x
+            if (boardRow in 0 until ROWS && boardColumn in 0 until COLUMNS) {
+                cells[boardRow][boardColumn] = lockedPiece.type.ordinal + 1
             }
         }
 
@@ -534,17 +560,19 @@ class TetrisGame(private val random: Random = Random.Default) {
         if (piece.type != TetrominoType.T || !lastActionWasRotation) return false
         val pivotRow = piece.row + 1
         val pivotColumn = piece.column + 1
-        val corners = listOf(
-            Block(pivotRow - 1, pivotColumn - 1),
-            Block(pivotRow - 1, pivotColumn + 1),
-            Block(pivotRow + 1, pivotColumn - 1),
-            Block(pivotRow + 1, pivotColumn + 1)
+        var occupiedCorners = 0
+        val corners = arrayOf(
+            pivotRow - 1 to pivotColumn - 1,
+            pivotRow - 1 to pivotColumn + 1,
+            pivotRow + 1 to pivotColumn - 1,
+            pivotRow + 1 to pivotColumn + 1
         )
-        return corners.count { corner ->
-            corner.row !in 0 until ROWS ||
-                corner.column !in 0 until COLUMNS ||
-                cells[corner.row][corner.column] != EMPTY
-        } >= 3
+        for ((row, column) in corners) {
+            if (row !in 0 until ROWS || column !in 0 until COLUMNS || cells[row][column] != EMPTY) {
+                occupiedCorners++
+            }
+        }
+        return occupiedCorners >= 3
     }
 
     private fun spawnPiece(guardHardDrop: Boolean) {
@@ -604,10 +632,6 @@ class TetrisGame(private val random: Random = Random.Default) {
 
     private fun canControl(): Boolean = active != null && !isPaused && !isGameOver
 
-    private fun canPlace(piece: FallingPiece): Boolean = piece.blocks().all { block ->
-        block.row in 0 until ROWS &&
-            block.column in 0 until COLUMNS &&
-            cells[block.row][block.column] == EMPTY
-    }
+    private fun canPlace(piece: FallingPiece): Boolean = !piece.overlaps(cells)
 
 }
