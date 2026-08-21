@@ -43,6 +43,9 @@ class SevenBagGenerator(private val random: Random = Random.Default) {
 
 data class Block(val row: Int, val column: Int)
 
+/** 顺时针旋转的基础墙踢偏移，以行、列交替存放，避免每次旋转创建 List<Pair>。 */
+private val rotationKickOffsets = intArrayOf(0, 0, 0, -1, 0, 1, 0, -2, 0, 2, -1, 0)
+
 data class FallingPiece(
     val type: TetrominoType,
     val rotation: Int,
@@ -347,12 +350,13 @@ class TetrisGame(private val random: Random = Random.Default) {
 
     fun rotateClockwise(): Boolean {
         if (!canControl()) return false
-        val candidate = active!!.rotated()
-        val kicks = listOf(0 to 0, 0 to -1, 0 to 1, 0 to -2, 0 to 2, -1 to 0)
-        kicks.forEach { (rowKick, columnKick) ->
-            val kicked = candidate.moved(rowKick, columnKick)
-            if (canPlace(kicked)) {
-                active = kicked
+        val piece = active ?: return false
+        val nextRotation = (piece.rotation + 1) % 4
+        for (index in rotationKickOffsets.indices step 2) {
+            val row = piece.row + rotationKickOffsets[index]
+            val column = piece.column + rotationKickOffsets[index + 1]
+            if (canPlaceAt(piece.type, nextRotation, row, column)) {
+                active = FallingPiece(piece.type, nextRotation, row, column)
                 lastActionWasRotation = true
                 afterGroundedManipulation()
                 return true
@@ -363,9 +367,10 @@ class TetrisGame(private val random: Random = Random.Default) {
 
     fun softDrop(): Boolean {
         if (!canControl()) return false
-        val moved = active!!.moved(rowDelta = 1)
-        return if (canPlace(moved)) {
-            active = moved
+        val piece = active ?: return false
+        val nextRow = piece.row + 1
+        return if (canPlaceAt(piece.type, piece.rotation, nextRow, piece.column)) {
+            active = piece.copy(row = nextRow)
             gravityProgressCells = 0.0
             lockDelayElapsedMillis = 0.0
             lastActionWasRotation = false
@@ -379,12 +384,14 @@ class TetrisGame(private val random: Random = Random.Default) {
 
     fun hardDrop(): Boolean {
         if (!canControl() || !InputSafetyRules.canHardDrop(hardDropGuardMillis)) return false
-        var distance = 0
-        while (canPlace(active!!.moved(rowDelta = 1))) {
-            active = active!!.moved(rowDelta = 1)
-            distance++
+        val piece = active ?: return false
+        var targetRow = piece.row
+        while (canPlaceAt(piece.type, piece.rotation, targetRow + 1, piece.column)) targetRow++
+        val distance = targetRow - piece.row
+        if (distance > 0) {
+            active = piece.copy(row = targetRow)
+            lastActionWasRotation = false
         }
-        if (distance > 0) lastActionWasRotation = false
         score += distance * 2
         lockPiece()
         return true
@@ -406,15 +413,21 @@ class TetrisGame(private val random: Random = Random.Default) {
         if (wholeCells <= 0) return false
         gravityProgressCells -= wholeCells
 
+        val piece = active ?: return false
+        var targetRow = piece.row
         repeat(wholeCells) {
-            val moved = active!!.moved(rowDelta = 1)
-            if (canPlace(moved)) {
-                active = moved
-                lastActionWasRotation = false
+            if (canPlaceAt(piece.type, piece.rotation, targetRow + 1, piece.column)) {
+                targetRow++
             } else {
+                if (targetRow != piece.row) {
+                    active = piece.copy(row = targetRow)
+                    lastActionWasRotation = false
+                }
                 return advanceLockDelay(deltaMillis)
             }
         }
+        active = piece.copy(row = targetRow)
+        lastActionWasRotation = false
         return true
     }
 
@@ -423,16 +436,18 @@ class TetrisGame(private val random: Random = Random.Default) {
 
     fun ghostPiece(): FallingPiece? {
         val piece = active ?: return null
-        var ghost = piece
-        while (canPlace(ghost.moved(rowDelta = 1))) ghost = ghost.moved(rowDelta = 1)
-        return ghost
+        var targetRow = piece.row
+        while (canPlaceAt(piece.type, piece.rotation, targetRow + 1, piece.column)) targetRow++
+        return if (targetRow == piece.row) piece else piece.copy(row = targetRow)
     }
 
     private fun tryMove(rowDelta: Int = 0, columnDelta: Int = 0): Boolean {
         if (!canControl()) return false
-        val candidate = active!!.moved(rowDelta, columnDelta)
-        return if (canPlace(candidate)) {
-            active = candidate
+        val piece = active ?: return false
+        val row = piece.row + rowDelta
+        val column = piece.column + columnDelta
+        return if (canPlaceAt(piece.type, piece.rotation, row, column)) {
+            active = piece.copy(row = row, column = column)
             lastActionWasRotation = false
             if (rowDelta == 0 && columnDelta != 0) afterGroundedManipulation()
             true
@@ -456,7 +471,7 @@ class TetrisGame(private val random: Random = Random.Default) {
 
         val clearedRows = clearCompletedRows()
         val cleared = clearedRows.size
-        val perfectClear = cleared > 0 && cells.all { row -> row.all { it == EMPTY } }
+        val perfectClear = cleared > 0 && isPerfectClear()
         lastClearedLines = cleared
         lastClearedRows = clearedRows
         lockRevision++
@@ -468,11 +483,18 @@ class TetrisGame(private val random: Random = Random.Default) {
     }
 
     private fun clearCompletedRows(): List<Int> {
-        val clearedRows = mutableListOf<Int>()
+        val clearedRows = ArrayList<Int>(4)
         var writeRow = ROWS - 1
         for (readRow in ROWS - 1 downTo 0) {
-            if (cells[readRow].all { it != EMPTY }) {
-                clearedRows += readRow
+            var complete = true
+            for (column in 0 until COLUMNS) {
+                if (cells[readRow][column] == EMPTY) {
+                    complete = false
+                    break
+                }
+            }
+            if (complete) {
+                clearedRows.add(readRow)
             } else {
                 if (writeRow != readRow) cells[readRow].copyInto(cells[writeRow])
                 writeRow--
@@ -561,17 +583,10 @@ class TetrisGame(private val random: Random = Random.Default) {
         val pivotRow = piece.row + 1
         val pivotColumn = piece.column + 1
         var occupiedCorners = 0
-        val corners = arrayOf(
-            pivotRow - 1 to pivotColumn - 1,
-            pivotRow - 1 to pivotColumn + 1,
-            pivotRow + 1 to pivotColumn - 1,
-            pivotRow + 1 to pivotColumn + 1
-        )
-        for ((row, column) in corners) {
-            if (row !in 0 until ROWS || column !in 0 until COLUMNS || cells[row][column] != EMPTY) {
-                occupiedCorners++
-            }
-        }
+        if (isOccupiedOrOutOfBounds(pivotRow - 1, pivotColumn - 1)) occupiedCorners++
+        if (isOccupiedOrOutOfBounds(pivotRow - 1, pivotColumn + 1)) occupiedCorners++
+        if (isOccupiedOrOutOfBounds(pivotRow + 1, pivotColumn - 1)) occupiedCorners++
+        if (isOccupiedOrOutOfBounds(pivotRow + 1, pivotColumn + 1)) occupiedCorners++
         return occupiedCorners >= 3
     }
 
@@ -603,7 +618,7 @@ class TetrisGame(private val random: Random = Random.Default) {
     private fun randomType(): TetrominoType = TetrominoType.entries[random.nextInt(TetrominoType.entries.size)]
 
     private fun isGrounded(): Boolean = active?.let { piece ->
-        !canPlace(piece.moved(rowDelta = 1))
+        !canPlaceAt(piece.type, piece.rotation, piece.row + 1, piece.column)
     } ?: false
 
     private fun advanceLockDelay(deltaMillis: Long): Boolean {
@@ -630,8 +645,32 @@ class TetrisGame(private val random: Random = Random.Default) {
         lockResetCount = 0
     }
 
+    private fun isPerfectClear(): Boolean {
+        for (row in 0 until ROWS) {
+            for (column in 0 until COLUMNS) {
+                if (cells[row][column] != EMPTY) return false
+            }
+        }
+        return true
+    }
+
+    private fun isOccupiedOrOutOfBounds(row: Int, column: Int): Boolean =
+        row !in 0 until ROWS || column !in 0 until COLUMNS || cells[row][column] != EMPTY
+
     private fun canControl(): Boolean = active != null && !isPaused && !isGameOver
 
-    private fun canPlace(piece: FallingPiece): Boolean = !piece.overlaps(cells)
+    private fun canPlaceAt(type: TetrominoType, rotation: Int, row: Int, column: Int): Boolean {
+        val shape = PieceLibrary.blocks(type, rotation)
+        for (index in shape.indices) {
+            val (x, y) = shape[index]
+            val boardRow = row + y
+            val boardColumn = column + x
+            if (isOccupiedOrOutOfBounds(boardRow, boardColumn)) return false
+        }
+        return true
+    }
+
+    private fun canPlace(piece: FallingPiece): Boolean =
+        canPlaceAt(piece.type, piece.rotation, piece.row, piece.column)
 
 }

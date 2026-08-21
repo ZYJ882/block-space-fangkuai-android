@@ -84,7 +84,6 @@ import com.blockspace.tetris.controls.HandlingPreset
 import com.blockspace.tetris.controls.HandlingSettings
 import com.blockspace.tetris.audio.GameSoundEffect
 import com.blockspace.tetris.audio.GameSoundPlayer
-import com.blockspace.tetris.game.Block
 import com.blockspace.tetris.game.FallingPiece
 import com.blockspace.tetris.game.PieceLibrary
 import com.blockspace.tetris.game.TetrisGame
@@ -201,10 +200,10 @@ fun TetrisApp() {
         timingRevision++
     }
 
-    fun updateGame(action: () -> Unit) {
-        action()
+    fun updateGame(action: () -> Boolean) {
+        if (!action()) return
         revision++
-        // 输入会改变重力进度、锁定时间或直降保护，需要取消旧等待并重新安排。
+        // 仅在规则状态实际改变时取消旧等待并重新安排，避免边界输入造成无效重组。
         timingRevision++
     }
 
@@ -215,6 +214,7 @@ fun TetrisApp() {
                     game.setPieceRandomizerMode(controlSettings.pieceRandomizer)
                     game.startNewGame()
                     soundPlayer.play(GameSoundEffect.START)
+                    true
                 }
                 hasStarted = true
             }
@@ -224,16 +224,39 @@ fun TetrisApp() {
             GameScreen(
                 game = game,
                 revision = revision,
-                onMoveLeft = { updateGame { if (game.moveLeft()) soundPlayer.play(GameSoundEffect.MOVE) } },
-                onMoveRight = { updateGame { if (game.moveRight()) soundPlayer.play(GameSoundEffect.MOVE) } },
-                onRotate = { updateGame { if (game.rotateClockwise()) soundPlayer.play(GameSoundEffect.ROTATE) } },
-                onSoftDrop = { updateGame { if (game.softDrop()) soundPlayer.play(GameSoundEffect.SOFT_DROP) } },
-                onHardDrop = { updateGame { if (game.hardDrop()) soundPlayer.play(GameSoundEffect.HARD_DROP) } },
+                onMoveLeft = {
+                    updateGame {
+                        game.moveLeft().also { if (it) soundPlayer.play(GameSoundEffect.MOVE) }
+                    }
+                },
+                onMoveRight = {
+                    updateGame {
+                        game.moveRight().also { if (it) soundPlayer.play(GameSoundEffect.MOVE) }
+                    }
+                },
+                onRotate = {
+                    updateGame {
+                        game.rotateClockwise().also { if (it) soundPlayer.play(GameSoundEffect.ROTATE) }
+                    }
+                },
+                onSoftDrop = {
+                    updateGame {
+                        game.softDrop().also { if (it) soundPlayer.play(GameSoundEffect.SOFT_DROP) }
+                    }
+                },
+                onHardDrop = {
+                    updateGame {
+                        game.hardDrop().also { if (it) soundPlayer.play(GameSoundEffect.HARD_DROP) }
+                    }
+                },
                 onPause = {
                     updateGame {
-                        if (!game.isGameOver) {
+                        if (game.isGameOver) {
+                            false
+                        } else {
                             game.togglePause()
                             soundPlayer.play(GameSoundEffect.PAUSE)
+                            true
                         }
                     }
                 },
@@ -241,6 +264,7 @@ fun TetrisApp() {
                     updateGame {
                         game.startNewGame()
                         soundPlayer.play(GameSoundEffect.START)
+                        true
                     }
                 },
                 controlSettings = controlSettings,
@@ -248,7 +272,10 @@ fun TetrisApp() {
                 onControlSettingsChange = ::updateControlSettings,
                 onFinishControlEditing = { showControlSettings = false },
                 onOpenControlSettings = {
-                    if (!game.isPaused) updateGame { game.togglePause() }
+                    if (!game.isPaused) updateGame {
+                        game.togglePause()
+                        true
+                    }
                     showControlSettings = true
                 }
             )
@@ -341,12 +368,11 @@ private fun GameScreen(
     onFinishControlEditing: () -> Unit,
     onOpenControlSettings: () -> Unit
 ) {
-    @Suppress("UNUSED_VARIABLE")
-    val observedRevision = revision
-    val board = game.board()
-    val activePiece = game.activePiece
-    val ghostPiece = game.ghostPiece()
-    val scoreEvent = game.lastScoreEvent
+    val board = remember(revision) { game.board() }
+    val activePiece = remember(revision) { game.activePiece }
+    val ghostPiece = remember(revision) { game.ghostPiece() }
+    val upcomingTypes = remember(revision) { game.upcomingTypes }
+    val scoreEvent = remember(revision) { game.lastScoreEvent }
 
     Box(
         modifier = Modifier
@@ -437,7 +463,7 @@ private fun GameScreen(
                         }
                     }
                     UpcomingPanel(
-                        types = game.upcomingTypes,
+                        types = upcomingTypes,
                         modifier = Modifier
                             .width(previewWidth)
                             .fillMaxHeight()
@@ -978,16 +1004,24 @@ private fun UpcomingPieceSlot(type: TetrominoType, index: Int, modifier: Modifie
 private fun NextPiecePreview(type: TetrominoType, modifier: Modifier = Modifier) {
     Canvas(modifier = modifier) {
         val cell = minOf(size.width / 4.8f, size.height / 4.6f)
-        val blocks = PieceLibrary.blocks(type, 0)
-        val minX = blocks.minOf { it.first }
-        val maxX = blocks.maxOf { it.first }
-        val minY = blocks.minOf { it.second }
-        val maxY = blocks.maxOf { it.second }
+        val shape = PieceLibrary.blocks(type, 0)
+        var minX = Int.MAX_VALUE
+        var maxX = Int.MIN_VALUE
+        var minY = Int.MAX_VALUE
+        var maxY = Int.MIN_VALUE
+        for (index in shape.indices) {
+            val (x, y) = shape[index]
+            minX = minOf(minX, x)
+            maxX = maxOf(maxX, x)
+            minY = minOf(minY, y)
+            maxY = maxOf(maxY, y)
+        }
         val groupWidth = (maxX - minX + 1) * cell
         val groupHeight = (maxY - minY + 1) * cell
         val startX = (size.width - groupWidth) / 2f - minX * cell
         val startY = (size.height - groupHeight) / 2f - minY * cell
-        blocks.forEach { (x, y) ->
+        for (index in shape.indices) {
+            val (x, y) = shape[index]
             drawBlock(
                 color = Color(type.color),
                 left = startX + x * cell,
@@ -1089,28 +1123,39 @@ private fun TetrisBoard(
             }
         }
 
-        val blockBuffer = ArrayList<Block>(4)
-        ghostPiece?.blocks(blockBuffer)?.forEach { block ->
-            if (block.row in 0 until TetrisGame.ROWS && block.column in 0 until TetrisGame.COLUMNS) {
-                drawBlockOutline(
-                    color = GhostColor,
-                    left = block.column * cell,
-                    top = block.row * cell,
-                    side = cell
-                )
+        ghostPiece?.let { piece ->
+            val shape = PieceLibrary.blocks(piece.type, piece.rotation)
+            for (index in shape.indices) {
+                val (x, y) = shape[index]
+                val row = piece.row + y
+                val column = piece.column + x
+                if (row in 0 until TetrisGame.ROWS && column in 0 until TetrisGame.COLUMNS) {
+                    drawBlockOutline(
+                        color = GhostColor,
+                        left = column * cell,
+                        top = row * cell,
+                        side = cell
+                    )
+                }
             }
         }
 
-        activePiece?.blocks(blockBuffer)?.forEach { block ->
-            if (block.row in 0 until TetrisGame.ROWS && block.column in 0 until TetrisGame.COLUMNS) {
-                val offsetRow = visualRow.value - activePiece.row
-                val offsetColumn = visualColumn.value - activePiece.column
-                drawBlock(
-                    color = Color(activePiece.type.color),
-                    left = (block.column + offsetColumn) * cell,
-                    top = (block.row + offsetRow) * cell,
-                    side = cell
-                )
+        activePiece?.let { piece ->
+            val rowOffset = visualRow.value - piece.row
+            val columnOffset = visualColumn.value - piece.column
+            val shape = PieceLibrary.blocks(piece.type, piece.rotation)
+            for (index in shape.indices) {
+                val (x, y) = shape[index]
+                val row = piece.row + y
+                val column = piece.column + x
+                if (row in 0 until TetrisGame.ROWS && column in 0 until TetrisGame.COLUMNS) {
+                    drawBlock(
+                        color = Color(piece.type.color),
+                        left = (column + columnOffset) * cell,
+                        top = (row + rowOffset) * cell,
+                        side = cell
+                    )
+                }
             }
         }
 
