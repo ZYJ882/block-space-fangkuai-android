@@ -6,6 +6,12 @@
 > 当前版本：`1.18.0`
 > 最低 Android 版本：Android 8.0（API 26）
 
+## 版本下载 / Releases
+
+所有历史版本均已作为独立 GitHub Release 发布。每个发布页都包含对应版本的 `BlockSpace-v<版本号>-debug.apk`、固定到该版本源码提交的 Git 标签，以及中英双语更新说明。请从 [Releases 页面](https://github.com/ZYJ882/block-space-fangkuai-android/releases) 选择需要的版本；当前最新版为 [v1.18.0](https://github.com/ZYJ882/block-space-fangkuai-android/releases/tag/v1.18.0)。
+
+> 所有安装包均为 **Android Debug 签名**，适用于测试、侧载和内部体验。若要发布到应用商店，请使用自己的正式签名密钥重新构建 Release 版本。
+
 ## 已实现功能
 
 | 模块 | 内容 |
