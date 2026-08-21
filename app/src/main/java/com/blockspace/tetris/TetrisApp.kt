@@ -82,6 +82,8 @@ import com.blockspace.tetris.controls.PixelPoint
 import com.blockspace.tetris.controls.PieceRandomizerMode
 import com.blockspace.tetris.controls.HandlingPreset
 import com.blockspace.tetris.controls.HandlingSettings
+import com.blockspace.tetris.audio.GameSoundEffect
+import com.blockspace.tetris.audio.GameSoundPlayer
 import com.blockspace.tetris.game.FallingPiece
 import com.blockspace.tetris.game.PieceLibrary
 import com.blockspace.tetris.game.TetrisGame
@@ -114,6 +116,7 @@ private val ArenaBackground = Brush.verticalGradient(
 fun TetrisApp() {
     val game = remember { TetrisGame() }
     val context = LocalContext.current
+    val soundPlayer = remember(context) { GameSoundPlayer(context.applicationContext) }
     val controlSettingsStore = remember(context) { ControlSettingsStore(context) }
     var controlSettings by remember { mutableStateOf(controlSettingsStore.load()) }
     var revision by remember { mutableIntStateOf(0) }
@@ -122,6 +125,33 @@ fun TetrisApp() {
     var showControlSettings by rememberSaveable { mutableStateOf(false) }
     val lifecycleOwner = LocalLifecycleOwner.current
     var appIsActive by remember { mutableStateOf(true) }
+
+    DisposableEffect(soundPlayer) {
+        onDispose { soundPlayer.release() }
+    }
+
+    LaunchedEffect(soundPlayer, controlSettings.soundEffectsEnabled) {
+        soundPlayer.setEnabled(controlSettings.soundEffectsEnabled)
+    }
+
+    var observedLockRevision by remember { mutableIntStateOf(game.lockRevision) }
+    LaunchedEffect(revision) {
+        val currentLockRevision = game.lockRevision
+        if (currentLockRevision <= observedLockRevision) {
+            observedLockRevision = currentLockRevision
+            return@LaunchedEffect
+        }
+        observedLockRevision = currentLockRevision
+        when {
+            game.isGameOver -> soundPlayer.play(GameSoundEffect.GAME_OVER)
+            game.lastClearedLines > 0 && (
+                game.lastScoreEvent?.title?.contains("T-SPIN") == true ||
+                    game.lastScoreEvent?.perfectClear == true
+                ) -> soundPlayer.play(GameSoundEffect.SPECIAL_CLEAR)
+            game.lastClearedLines > 0 -> soundPlayer.play(GameSoundEffect.LINE_CLEAR)
+            else -> soundPlayer.play(GameSoundEffect.LOCK)
+        }
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
@@ -183,6 +213,7 @@ fun TetrisApp() {
                 updateGame {
                     game.setPieceRandomizerMode(controlSettings.pieceRandomizer)
                     game.startNewGame()
+                    soundPlayer.play(GameSoundEffect.START)
                 }
                 hasStarted = true
             }
@@ -192,13 +223,25 @@ fun TetrisApp() {
             GameScreen(
                 game = game,
                 revision = revision,
-                onMoveLeft = { updateGame { game.moveLeft() } },
-                onMoveRight = { updateGame { game.moveRight() } },
-                onRotate = { updateGame { game.rotateClockwise() } },
-                onSoftDrop = { updateGame { game.softDrop() } },
-                onHardDrop = { updateGame { game.hardDrop() } },
-                onPause = { updateGame { game.togglePause() } },
-                onRestart = { updateGame { game.startNewGame() } },
+                onMoveLeft = { updateGame { if (game.moveLeft()) soundPlayer.play(GameSoundEffect.MOVE) } },
+                onMoveRight = { updateGame { if (game.moveRight()) soundPlayer.play(GameSoundEffect.MOVE) } },
+                onRotate = { updateGame { if (game.rotateClockwise()) soundPlayer.play(GameSoundEffect.ROTATE) } },
+                onSoftDrop = { updateGame { if (game.softDrop()) soundPlayer.play(GameSoundEffect.SOFT_DROP) } },
+                onHardDrop = { updateGame { if (game.hardDrop()) soundPlayer.play(GameSoundEffect.HARD_DROP) } },
+                onPause = {
+                    updateGame {
+                        if (!game.isGameOver) {
+                            game.togglePause()
+                            soundPlayer.play(GameSoundEffect.PAUSE)
+                        }
+                    }
+                },
+                onRestart = {
+                    updateGame {
+                        game.startNewGame()
+                        soundPlayer.play(GameSoundEffect.START)
+                    }
+                },
                 controlSettings = controlSettings,
                 isEditingControls = showControlSettings,
                 onControlSettingsChange = ::updateControlSettings,
@@ -590,13 +633,38 @@ private fun FullScreenControlEditorToolbar(
                 )
             }
 
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("④ 游戏音效", style = MaterialTheme.typography.labelLarge, color = Color(0xFFBFE8FF))
+                Text(
+                    "包含移动、旋转、下落、锁定、消行、暂停与游戏结束提示；长按操作会自动节流，避免声音堆叠。",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = Color(0xFFD5ECFF)
+                )
+                Button(
+                    onClick = {
+                        onSettingsChange(settings.applySoundEffectsEnabled(!settings.soundEffectsEnabled))
+                    },
+                    modifier = Modifier.fillMaxWidth().height(38.dp),
+                    shape = RoundedCornerShape(11.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (settings.soundEffectsEnabled) ActionGold else PanelBlue,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Text(
+                        if (settings.soundEffectsEnabled) "音效已开启（点击关闭）" else "音效已关闭（点击开启）",
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text("④ 键位位置", style = MaterialTheme.typography.labelLarge, color = Color(0xFFBFE8FF))
+                    Text("⑤ 键位位置", style = MaterialTheme.typography.labelLarge, color = Color(0xFFBFE8FF))
                     Text("直接拖动下方真实按键即可调整位置。", style = MaterialTheme.typography.labelLarge, color = Color(0xFFD5ECFF))
                 }
                 Button(

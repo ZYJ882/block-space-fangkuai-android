@@ -31,6 +31,20 @@ class HandlingSettingsTest {
     }
 
     @Test
+    fun soundEffectsDefaultToEnabledAndCanBeChangedIndependently() {
+        val settings = ControlSettings()
+            .applyAdvancedHandling(dasMillis = 145L, arrMillis = 35L)
+            .applyPieceRandomizer(PieceRandomizerMode.TRUE_RANDOM)
+            .applySoundEffectsEnabled(false)
+
+        assertEquals(false, settings.soundEffectsEnabled)
+        assertEquals(HandlingPreset.CUSTOM, settings.preset)
+        assertEquals(145L, settings.handling.dasMillis)
+        assertEquals(35L, settings.handling.arrMillis)
+        assertEquals(PieceRandomizerMode.TRUE_RANDOM, settings.pieceRandomizer)
+    }
+
+    @Test
     fun choosingPresetReplacesCustomHandlingValues() {
         val settings = ControlSettings()
             .applyAdvancedHandling(dasMillis = 210L, arrMillis = 30L)

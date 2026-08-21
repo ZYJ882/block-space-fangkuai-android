@@ -229,6 +229,7 @@ data class ControlSettings(
     val handling: HandlingSettings = HandlingSettings.fromPreset(HandlingPreset.COMFORT),
     val fallSpeed: FallSpeedPreset = FallSpeedPreset.STANDARD,
     val pieceRandomizer: PieceRandomizerMode = PieceRandomizerMode.SEVEN_BAG,
+    val soundEffectsEnabled: Boolean = true,
     val layout: FreeControlLayout = FreeControlLayout.standard()
 ) {
     fun applyPreset(preset: HandlingPreset): ControlSettings = copy(
@@ -244,6 +245,8 @@ data class ControlSettings(
     fun applyFallSpeed(fallSpeed: FallSpeedPreset): ControlSettings = copy(fallSpeed = fallSpeed)
 
     fun applyPieceRandomizer(mode: PieceRandomizerMode): ControlSettings = copy(pieceRandomizer = mode)
+
+    fun applySoundEffectsEnabled(enabled: Boolean): ControlSettings = copy(soundEffectsEnabled = enabled)
 }
 
 class ControlSettingsStore(context: Context) {
@@ -259,6 +262,7 @@ class ControlSettingsStore(context: Context) {
             preset = preset,
             fallSpeed = FallSpeedPreset.fromName(preferences.getString(KEY_FALL_SPEED, null)),
             pieceRandomizer = PieceRandomizerMode.fromName(preferences.getString(KEY_PIECE_RANDOMIZER, null)),
+            soundEffectsEnabled = preferences.getBoolean(KEY_SOUND_EFFECTS_ENABLED, true),
             handling = HandlingSettings.clamp(
                 preferences.getLong(KEY_DAS, defaultHandling.dasMillis),
                 preferences.getLong(KEY_ARR, defaultHandling.arrMillis)
@@ -277,6 +281,7 @@ class ControlSettingsStore(context: Context) {
             .putLong(KEY_ARR, settings.handling.arrMillis)
             .putString(KEY_FALL_SPEED, settings.fallSpeed.name)
             .putString(KEY_PIECE_RANDOMIZER, settings.pieceRandomizer.name)
+            .putBoolean(KEY_SOUND_EFFECTS_ENABLED, settings.soundEffectsEnabled)
             .putString(KEY_LAYOUT, settings.layout.encode())
             .apply()
     }
@@ -287,6 +292,7 @@ class ControlSettingsStore(context: Context) {
         const val KEY_ARR = "handling_arr_ms"
         const val KEY_FALL_SPEED = "fall_speed_preset"
         const val KEY_PIECE_RANDOMIZER = "piece_randomizer_mode"
+        const val KEY_SOUND_EFFECTS_ENABLED = "sound_effects_enabled"
         const val KEY_LAYOUT = "free_layout"
     }
 }
