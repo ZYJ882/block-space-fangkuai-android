@@ -1,5 +1,6 @@
 package com.blockspace.tetris
 
+import android.view.MotionEvent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -13,7 +14,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -54,11 +54,13 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -73,6 +75,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import com.blockspace.tetris.controls.ControlAction
 import com.blockspace.tetris.controls.ControlAreaGeometry
 import com.blockspace.tetris.controls.ControlSettings
@@ -225,10 +228,10 @@ fun TetrisApp() {
         timingRevision++
     }
 
-    fun updateGame(action: () -> Boolean) {
+    fun updateGame(allowWhenGameOver: Boolean = false, action: () -> Boolean) {
         val pendingGarbage = lanManager.consumePendingGarbage()
         val garbageApplied = pendingGarbage > 0 && game.applyGarbage(pendingGarbage)
-        val actionApplied = if (game.isGameOver) false else action()
+        val actionApplied = if (game.isGameOver && !allowWhenGameOver) false else action()
         if (!garbageApplied && !actionApplied) return
         lanManager.publishGame(game)
         revision++
@@ -325,7 +328,7 @@ fun TetrisApp() {
                     }
                 },
                 onRestart = {
-                    updateGame {
+                    updateGame(allowWhenGameOver = true) {
                         game.startNewGame()
                         soundPlayer.play(GameSoundEffect.START)
                         true
@@ -1651,6 +1654,7 @@ private fun actionColor(action: ControlAction): Color = when (action) {
     ControlAction.HARD_DROP -> ActionGold
 }
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun ControlDisc(
     symbol: String,
@@ -1680,33 +1684,50 @@ private fun ControlDisc(
 
     val latestAction by rememberUpdatedState(onClick)
     val scope = rememberCoroutineScope()
-    val repeatJobHolder = remember { arrayOfNulls<Job>(1) }
+    var repeatJob by remember { mutableStateOf<Job?>(null) }
+    var heldPointerId by remember { mutableIntStateOf(MotionEvent.INVALID_POINTER_ID) }
+
+    fun stopRepeatingInput() {
+        repeatJob?.cancel()
+        repeatJob = null
+        heldPointerId = MotionEvent.INVALID_POINTER_ID
+    }
+
+    DisposableEffect(enabled) {
+        onDispose { stopRepeatingInput() }
+    }
 
     Box(
         modifier = modifier
             .size(width = buttonWidth, height = buttonHeight)
             .clip(RoundedCornerShape(16.dp))
             .background(if (enabled) color else color.copy(alpha = 0.38f))
-            .pointerInput(enabled, initialDelayMillis, repeatIntervalMillis) {
-                if (!enabled) return@pointerInput
-                detectTapGestures(
-                    onPress = {
+            .pointerInteropFilter { event ->
+                if (!enabled) return@pointerInteropFilter false
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        stopRepeatingInput()
+                        heldPointerId = event.getPointerId(0)
                         latestAction()
-                        repeatJobHolder[0] = scope.launch {
+                        repeatJob = scope.launch {
                             delay(initialDelayMillis)
-                            while (true) {
+                            while (isActive) {
                                 latestAction()
-                                delay(repeatIntervalMillis)
+                                delay(repeatIntervalMillis.coerceAtLeast(1L))
                             }
                         }
-                        try {
-                            tryAwaitRelease()
-                        } finally {
-                            repeatJobHolder[0]?.cancel()
-                            repeatJobHolder[0] = null
-                        }
+                        true
                     }
-                )
+                    MotionEvent.ACTION_POINTER_UP -> {
+                        if (event.getPointerId(event.actionIndex) == heldPointerId) stopRepeatingInput()
+                        true
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        stopRepeatingInput()
+                        true
+                    }
+                    else -> true
+                }
             },
         contentAlignment = Alignment.Center
     ) {
