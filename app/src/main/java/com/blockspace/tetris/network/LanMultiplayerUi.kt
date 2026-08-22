@@ -4,6 +4,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -226,19 +227,22 @@ fun OpponentPanel(players: List<LanPlayer>, modifier: Modifier = Modifier) {
         shape = RoundedCornerShape(13.dp)
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 6.dp),
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp)
+            verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             Text("对手", style = MaterialTheme.typography.labelLarge, color = Color.White)
-            Text("${players.size} PLAYERS", style = MaterialTheme.typography.labelSmall, color = Color(0xFFA7D8FC))
+            Text("${players.size} 名", style = MaterialTheme.typography.labelSmall, color = Color(0xFFA7D8FC))
             if (players.isEmpty()) {
-                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("等待玩家", color = Color(0xFFB8DDF8), style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
-                }
+                Text("等待玩家", color = Color(0xFFB8DDF8), style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
             } else {
+                val tileHeight = when (players.size) {
+                    1 -> 138.dp
+                    2 -> 136.dp
+                    else -> 132.dp
+                }
                 players.forEach { player ->
-                    OpponentTile(player = player, modifier = Modifier.weight(1f))
+                    OpponentTile(player = player, modifier = Modifier.height(tileHeight))
                 }
             }
         }
@@ -269,8 +273,8 @@ private fun OpponentTile(player: LanPlayer, modifier: Modifier = Modifier) {
                     RemoteMetric("分", snapshot.score.toString())
                     RemoteMetric("行", snapshot.lines.toString())
                 }
-                OpponentBoard(snapshot, modifier = Modifier.fillMaxWidth().weight(1f))
-            } ?: Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                OpponentBoard(snapshot, modifier = Modifier.width(46.dp).height(92.dp))
+            } ?: Box(modifier = Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                 Text("等待状态", color = Color(0xFFB8DDF8), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
             }
         }

@@ -586,7 +586,7 @@ private fun GameScreen(
                             players = opponents,
                             modifier = Modifier
                                 .width(opponentWidth)
-                                .fillMaxHeight()
+                                .align(Alignment.Top)
                         )
                     }
                 }

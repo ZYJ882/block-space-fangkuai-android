@@ -285,14 +285,11 @@ class LanMultiplayerManager(context: Context) {
         }
     }
 
-    /** 在游戏规则状态真正变化后调用，同步自己的棋盘并向所有其他存活玩家发送攻击。 */
+    /** 在游戏规则状态真正变化后调用，同步自己的可见棋盘与对手观察信息；多人模式不发送攻击。 */
     fun publishGame(game: TetrisGame) {
         val snapshot = snapshotFrom(game)
-        val attack = if (game.lockRevision != lastPublishedLockRevision) {
+        if (game.lockRevision != lastPublishedLockRevision) {
             lastPublishedLockRevision = game.lockRevision
-            attackForLines(game.lastClearedLines)
-        } else {
-            0
         }
         val localId = localPlayerId ?: return
         val shouldFinish = game.isGameOver
@@ -301,20 +298,17 @@ class LanMultiplayerManager(context: Context) {
             updatePlayerSnapshot(localId, snapshot)
             if (isHostSession) {
                 broadcastToPeers("STATE|$localId|${serializeSnapshot(snapshot)}")
-                if (attack > 0) routeAttack(localId, attack)
             } else {
                 sendToClient("STATE|${clientConnection?.token ?: return}|${serializeSnapshot(snapshot)}")
-                if (attack > 0) sendToClient("ATTACK|${clientConnection?.token ?: return}|$attack")
             }
         }
         if (shouldFinish) markLocalEliminated()
     }
 
+    /** 多人模式采用纯竞速淘汰规则，不接收或应用灰色垃圾行。 */
     fun consumePendingGarbage(): Int = synchronized(stateLock) {
-        if (_uiState.value.status != LanStatus.PLAYING) return 0
-        val pending = _uiState.value.pendingGarbageLines
-        if (pending > 0) publishState(pendingGarbageLines = 0)
-        pending
+        if (_uiState.value.pendingGarbageLines > 0) publishState(pendingGarbageLines = 0)
+        0
     }
 
     fun close() = synchronized(stateLock) {
@@ -468,11 +462,8 @@ class LanMultiplayerManager(context: Context) {
                     }
                 }
             }
-            "ATTACK" -> {
-                if (!validateHostToken(peer, parts, 3)) return
-                val lines = parts[2].toIntOrNull()?.coerceIn(0, 4) ?: 0
-                if (lines > 0) synchronized(stateLock) { routeAttack(peer.id ?: return, lines) }
-            }
+            // v1.22.1 起多人比赛采用纯竞速淘汰规则；忽略旧客户端的攻击消息。
+            "ATTACK" -> Unit
             "FINISH" -> {
                 if (!validateHostToken(peer, parts, 2)) return
                 synchronized(stateLock) { eliminatePlayer(peer.id ?: return) }
@@ -520,17 +511,20 @@ class LanMultiplayerManager(context: Context) {
                     }
                 }
             }
-            "GARBAGE" -> if (parts.size == 3) {
-                val lines = parts[2].toIntOrNull()?.coerceIn(0, 4) ?: 0
-                if (lines > 0) synchronized(stateLock) {
-                    publishState(pendingGarbageLines = (_uiState.value.pendingGarbageLines + lines).coerceAtMost(TetrisGame.ROWS))
-                }
-            }
+            // 兼容旧房主消息：多人比赛不显示也不应用灰色垃圾行。
+            "GARBAGE" -> Unit
             "ELIM" -> if (parts.size == 2) synchronized(stateLock) { markEliminatedInState(parts[1]) }
             "RESULT" -> if (parts.size == 2) synchronized(stateLock) {
                 val winner = roomPlayers[parts[1]]?.name ?: "未命名玩家"
                 winnerName = winner
                 publishState(status = LanStatus.FINISHED, winnerName = winner, message = "比赛结束，胜者：$winner")
+            }
+            "ABORT" -> synchronized(stateLock) {
+                matchStarted = false
+                winnerName = null
+                localFinished = false
+                closeClientInternal(notifyHost = false)
+                publishState(status = LanStatus.ERROR, winnerName = null, pendingGarbageLines = 0, message = parts.getOrNull(1) ?: "有玩家连接中断，本局比赛已取消。")
             }
             "REJECT" -> {
                 val reason = parts.getOrNull(1) ?: "房主拒绝了连接。"
@@ -562,17 +556,6 @@ class LanMultiplayerManager(context: Context) {
         publishState()
     }
 
-    private fun routeAttack(sourceId: String, lines: Int) {
-        if (_uiState.value.status != LanStatus.PLAYING) return
-        roomPlayers.values.filter { it.id != sourceId && it.isAlive }.forEach { target ->
-            if (target.id == HOST_PLAYER_ID) {
-                publishState(pendingGarbageLines = (_uiState.value.pendingGarbageLines + lines).coerceAtMost(TetrisGame.ROWS))
-            } else {
-                hostPeers[target.id]?.let { sendToPeer(it, "GARBAGE|$sourceId|$lines") }
-            }
-        }
-    }
-
     private fun eliminatePlayer(playerId: String) {
         val player = roomPlayers[playerId] ?: return
         if (!player.isAlive) return
@@ -597,12 +580,20 @@ class LanMultiplayerManager(context: Context) {
         if (id == null) return
         hostPeers.remove(id, peer)
         if (matchStarted) {
-            eliminatePlayer(id)
+            cancelMatchForDisconnect("${roomPlayers[id]?.name ?: "一名玩家"} 连接中断，本局比赛已取消；请重新创建或加入房间。")
         } else {
             roomPlayers.remove(id)
             publishState(status = LanStatus.LOBBY, message = reason)
             broadcastRoster()
         }
+    }
+
+    private fun cancelMatchForDisconnect(reason: String) {
+        matchStarted = false
+        localFinished = false
+        winnerName = null
+        broadcastToPeers("ABORT|$reason")
+        publishState(status = LanStatus.ERROR, winnerName = null, pendingGarbageLines = 0, message = reason)
     }
 
     private fun rejectPeer(peer: HostPeer, reason: String) {
@@ -747,13 +738,6 @@ class LanMultiplayerManager(context: Context) {
             if (id.isBlank() || name.isBlank()) null else LanPlayer(id, name, isHost, isAlive)
         }
         return if (parsed.isNotEmpty() && parsed.size <= MAX_PLAYERS) parsed else null
-    }
-
-    private fun attackForLines(lines: Int): Int = when (lines) {
-        2 -> 1
-        3 -> 2
-        4 -> 4
-        else -> 0
     }
 
     private fun registerRoom(roomName: String, port: Int) {
