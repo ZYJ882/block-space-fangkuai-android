@@ -9,6 +9,7 @@ import com.blockspace.tetris.game.StandardAttackRules
 import com.blockspace.tetris.game.TetrisGame
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -24,7 +25,7 @@ import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 
 private const val SERVICE_TYPE = "_blockspace._tcp."
-private const val PROTOCOL_VERSION = "4"
+private const val PROTOCOL_VERSION = "5"
 private const val MAX_MESSAGE_LENGTH = 1_024
 private const val MAX_PLAYERS = 4
 private const val HOST_PLAYER_ID = "HOST"
@@ -49,8 +50,8 @@ enum class LanStatus {
 enum class LanMatchMode(val wireName: String, val label: String, val description: String) {
     RACE(
         wireName = "RACE",
-        label = "竞速淘汰",
-        description = "默认模式：无灰色垃圾行，真实堆顶才淘汰。"
+        label = "40行竞速",
+        description = "默认模式：无灰色垃圾行；先安全消除 40 行者赢，2分30秒防拖延。"
     ),
     STANDARD_ATTACK(
         wireName = "ATTACK",
@@ -100,6 +101,8 @@ data class LanUiState(
     val players: List<LanPlayer> = emptyList(),
     val matchMode: LanMatchMode = LanMatchMode.RACE,
     val matchSeed: Int? = null,
+    val raceTargetLines: Int? = null,
+    val raceTimeLimitMillis: Long? = null,
     val roundNumber: Int = 1,
     val roundWins: Map<String, Int> = emptyMap(),
     val roundWinnerName: String? = null,
@@ -149,6 +152,7 @@ class LanMultiplayerManager(context: Context) {
     private val roundWins = LinkedHashMap<String, Int>()
     private var roundWinnerName: String? = null
     private var attackTargetCursor = 0
+    private var raceTimerJob: Job? = null
     private val pendingGarbageBatches = ArrayDeque<PendingGarbage>()
 
     private data class PendingGarbage(var lines: Int, val availableAtMillis: Long)
@@ -327,6 +331,7 @@ class LanMultiplayerManager(context: Context) {
             publishState(status = LanStatus.PLAYING, pendingGarbageLines = 0, message = "${matchMode.label}· 第 1 局开始 · 先胜 $ROUNDS_TO_WIN 局。")
             broadcastRoster()
             broadcastToPeers("START|${matchMode.wireName}|${matchSeed}")
+            startRaceTimerIfNeeded()
         }
     }
 
@@ -344,6 +349,10 @@ class LanMultiplayerManager(context: Context) {
                 broadcastToPeers("STATE|$localId|${serializeSnapshot(snapshot)}")
             } else {
                 sendToClient("STATE|${clientConnection?.token ?: return}|${serializeSnapshot(snapshot)}")
+            }
+            if (newLock && matchMode == LanMatchMode.RACE && RaceRules.hasFinished(snapshot.lines)) {
+                if (isHostSession) finishRound(localId)
+                return
             }
             if (newLock && matchMode == LanMatchMode.STANDARD_ATTACK) {
                 val outgoing = StandardAttackRules.linesFor(game.lastScoreEvent)
@@ -568,6 +577,9 @@ class LanMultiplayerManager(context: Context) {
                         if (_uiState.value.status == LanStatus.PLAYING) {
                             updatePlayerSnapshot(id, snapshot)
                             broadcastToPeers("STATE|$id|${serializeSnapshot(snapshot)}")
+                            if (matchMode == LanMatchMode.RACE && RaceRules.hasFinished(snapshot.lines)) {
+                                finishRound(id)
+                            }
                         }
                     }
                 }
@@ -641,6 +653,18 @@ class LanMultiplayerManager(context: Context) {
                 if (parts.size == 2) parts[1].toIntOrNull()?.let { lines -> synchronized(stateLock) { queueIncomingGarbage(lines) } }
             }
             "ELIM" -> if (parts.size == 2) synchronized(stateLock) { markEliminatedInState(parts[1]) }
+            "ROUND_TIE" -> if (parts.size == 1) synchronized(stateLock) {
+                if (_uiState.value.status == LanStatus.FINISHED) return@synchronized
+                roundWinnerName = "平局"
+                localFinished = true
+                pendingGarbageBatches.clear()
+                publishState(
+                    status = LanStatus.ROUND_OVER,
+                    roundWinnerName = "平局",
+                    pendingGarbageLines = 0,
+                    message = "第 $roundNumber 局时间到，核心数据完全相同，本局平局重赛。"
+                )
+            }
             "ROUND_RESULT" -> if (parts.size == 3) synchronized(stateLock) {
                 if (_uiState.value.status == LanStatus.FINISHED) return@synchronized
                 parseRoundWins(parts[2])?.let { scores ->
@@ -746,6 +770,7 @@ class LanMultiplayerManager(context: Context) {
     }
 
     private fun finishRound(winnerId: String?) {
+        cancelRaceTimer()
         val roundWinner = winnerId?.let { roomPlayers[it]?.name } ?: "无人"
         roundWinnerName = roundWinner
         localFinished = true
@@ -779,9 +804,9 @@ class LanMultiplayerManager(context: Context) {
         }
     }
 
-    private fun startNextRound() {
+    private fun startNextRound(replayCurrentRound: Boolean = false) {
         if (!matchStarted || _uiState.value.status != LanStatus.ROUND_OVER) return
-        roundNumber++
+        if (!replayCurrentRound) roundNumber++
         roundWinnerName = null
         localFinished = false
         matchSeed = secureRandom.nextInt()
@@ -792,10 +817,66 @@ class LanMultiplayerManager(context: Context) {
         publishState(
             status = LanStatus.PLAYING,
             pendingGarbageLines = 0,
-            message = "${matchMode.label}· 第 $roundNumber 局开始 · 先胜 $ROUNDS_TO_WIN 局。"
+            message = "${matchMode.label}· 第 $roundNumber 局${if (replayCurrentRound) "重赛" else "开始"} · 先胜 $ROUNDS_TO_WIN 局。"
         )
         broadcastRoster()
         broadcastToPeers("NEXT_ROUND|${matchMode.wireName}|${matchSeed}|$roundNumber|${serializeRoundWins()}")
+        startRaceTimerIfNeeded()
+    }
+
+    private fun startRaceTimerIfNeeded() {
+        cancelRaceTimer()
+        if (!isHostSession || matchMode != LanMatchMode.RACE || _uiState.value.status != LanStatus.PLAYING) return
+        raceTimerJob = scope.launch {
+            delay(RaceRules.TIME_LIMIT_MILLIS)
+            synchronized(stateLock) {
+                if (matchStarted && matchMode == LanMatchMode.RACE && _uiState.value.status == LanStatus.PLAYING) {
+                    finishRaceOnTimeout()
+                }
+            }
+        }
+    }
+
+    private fun cancelRaceTimer() {
+        raceTimerJob?.cancel()
+        raceTimerJob = null
+    }
+
+    private fun finishRaceOnTimeout() {
+        val progress = roomPlayers.values
+            .filter { it.isAlive }
+            .associate { player ->
+                val snapshot = player.snapshot
+                player.id to RaceRules.Progress(
+                    lines = snapshot?.lines ?: 0,
+                    stackHeight = snapshot?.board?.let(RaceRules::stackHeight) ?: TetrisGame.ROWS,
+                    score = snapshot?.score ?: 0
+                )
+            }
+        val winnerId = RaceRules.timeoutWinner(progress)
+        if (winnerId != null) {
+            finishRound(winnerId)
+        } else {
+            restartTiedRace()
+        }
+    }
+
+    private fun restartTiedRace() {
+        cancelRaceTimer()
+        roundWinnerName = "平局"
+        localFinished = true
+        pendingGarbageBatches.clear()
+        broadcastToPeers("ROUND_TIE")
+        publishState(
+            status = LanStatus.ROUND_OVER,
+            roundWinnerName = "平局",
+            pendingGarbageLines = 0,
+            message = "第 $roundNumber 局时间到，核心数据完全相同，本局平局重赛。"
+        )
+        scope.launch {
+            delay(ROUND_INTERMISSION_MILLIS)
+            synchronized(stateLock) { startNextRound(replayCurrentRound = true) }
+        }
     }
 
     private fun serializeRoundWins(): String = roomPlayers.keys.joinToString(",") { id -> "$id:${roundWins[id] ?: 0}" }
@@ -829,6 +910,7 @@ class LanMultiplayerManager(context: Context) {
     }
 
     private fun cancelMatchForDisconnect(reason: String) {
+        cancelRaceTimer()
         matchStarted = false
         localFinished = false
         winnerName = null
@@ -1055,6 +1137,7 @@ class LanMultiplayerManager(context: Context) {
         roomsByName.clear()
         releaseMulticastLock()
         roomPlayers.clear()
+        cancelRaceTimer()
         isHostSession = false
         localPlayerId = null
         matchStarted = false
@@ -1094,6 +1177,8 @@ class LanMultiplayerManager(context: Context) {
         players: List<LanPlayer> = roomPlayers.values.toList(),
         matchMode: LanMatchMode = this.matchMode,
         matchSeed: Int? = this.matchSeed,
+        raceTargetLines: Int? = if (this.matchMode == LanMatchMode.RACE) RaceRules.TARGET_LINES else null,
+        raceTimeLimitMillis: Long? = if (this.matchMode == LanMatchMode.RACE) RaceRules.TIME_LIMIT_MILLIS else null,
         roundNumber: Int = this.roundNumber,
         roundWins: Map<String, Int> = this.roundWins.toMap(),
         roundWinnerName: String? = this.roundWinnerName,
@@ -1110,6 +1195,8 @@ class LanMultiplayerManager(context: Context) {
             players = players,
             matchMode = matchMode,
             matchSeed = matchSeed,
+            raceTargetLines = raceTargetLines,
+            raceTimeLimitMillis = raceTimeLimitMillis,
             roundNumber = roundNumber,
             roundWins = roundWins,
             roundWinnerName = roundWinnerName,

@@ -318,6 +318,8 @@ fun TetrisApp() {
                 roundNumber = lanState.roundNumber,
                 roundWins = lanState.roundWins,
                 lanMatchMode = if (showLanLobby && lanMatchStarted) lanState.matchMode else null,
+                raceTargetLines = lanState.raceTargetLines,
+                raceTimeLimitMillis = lanState.raceTimeLimitMillis,
                 pendingGarbageLines = lanState.pendingGarbageLines,
                 onExitLanMatch = {
                     lanManager.close()
@@ -486,6 +488,8 @@ private fun GameScreen(
     roundNumber: Int,
     roundWins: Map<String, Int>,
     lanMatchMode: LanMatchMode?,
+    raceTargetLines: Int?,
+    raceTimeLimitMillis: Long?,
     pendingGarbageLines: Int,
     onExitLanMatch: () -> Unit,
     onMoveLeft: () -> Unit,
@@ -536,6 +540,9 @@ private fun GameScreen(
                 b2bReady = game.isBackToBack,
                 fallSpeed = if (isLanBattle) FallSpeedPreset.STANDARD else controlSettings.fallSpeed,
                 lanMatchMode = lanMatchMode,
+                raceProgress = if (lanMatchMode == LanMatchMode.RACE && raceTargetLines != null && raceTimeLimitMillis != null) {
+                    "竞速 ${game.lines.coerceAtMost(raceTargetLines)}/$raceTargetLines 行 · ${raceTimeLimitMillis / 60_000}:${((raceTimeLimitMillis / 1_000) % 60).toString().padStart(2, '0')} 上限"
+                } else null,
                 pendingGarbageLines = pendingGarbageLines,
                 roundSummary = if (isLanBattle) "第 $roundNumber 局 · FT3 · ${roundWins.values.joinToString(":")}" else null
             )
@@ -1020,6 +1027,7 @@ private fun ScoreBanner(
     b2bReady: Boolean,
     fallSpeed: FallSpeedPreset,
     lanMatchMode: LanMatchMode?,
+    raceProgress: String?,
     pendingGarbageLines: Int,
     roundSummary: String?
 ) {
@@ -1068,6 +1076,9 @@ private fun ScoreBanner(
             style = MaterialTheme.typography.labelLarge,
             color = Color(0xFFBCE6FF)
         )
+        raceProgress?.let { progress ->
+            Text(progress, style = MaterialTheme.typography.labelLarge, color = Color(0xFFFFD38A))
+        }
         roundSummary?.let { summary ->
             Text(summary, style = MaterialTheme.typography.labelLarge, color = Color(0xFF86EEBB))
         }

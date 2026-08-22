@@ -202,9 +202,9 @@ private fun ColumnScope.RoomBrowser(
                 shape = RoundedCornerShape(13.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFA319))
             ) {
-                Text("创建竞速淘汰房间（默认）", style = MaterialTheme.typography.titleMedium)
+                Text("创建 40 行竞速房间（默认）", style = MaterialTheme.typography.titleMedium)
             }
-            Text("无灰色垃圾行 · 固定 7-Bag · 真实堆顶才淘汰", style = MaterialTheme.typography.labelMedium, color = Color(0xFFFFE0A5))
+            Text("无灰色垃圾行 · 先安全完成 40 行获胜 · 2分30秒防拖延", style = MaterialTheme.typography.labelMedium, color = Color(0xFFFFE0A5))
             OutlinedButton(
                 onClick = { onCreateRoom(LanMatchMode.STANDARD_ATTACK) },
                 modifier = Modifier.fillMaxWidth().height(44.dp)
