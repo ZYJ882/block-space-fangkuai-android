@@ -90,7 +90,9 @@ data class ScoreEvent(
     val points: Int,
     val combo: Int,
     val backToBackApplied: Boolean,
-    val perfectClear: Boolean
+    val perfectClear: Boolean,
+    val clearedLines: Int,
+    val isTSpin: Boolean
 )
 
 private enum class ClearAction(
@@ -215,7 +217,7 @@ object PieceLibrary {
         shapes.getValue(type)[rotation % 4]
 }
 
-class TetrisGame(private val random: Random = Random.Default) {
+class TetrisGame(private var random: Random = Random.Default) {
     companion object {
         const val ROWS = 20
         const val COLUMNS = 10
@@ -227,7 +229,7 @@ class TetrisGame(private val random: Random = Random.Default) {
     }
 
     private val cells = Array(ROWS) { IntArray(COLUMNS) { EMPTY } }
-    private val pieceGenerator = SevenBagGenerator(random)
+    private var pieceGenerator = SevenBagGenerator(random)
     private var activeRandomizerMode = PieceRandomizerMode.SEVEN_BAG
     private var active: FallingPiece? = null
     private val upcomingQueue = ArrayDeque<TetrominoType>()
@@ -336,7 +338,15 @@ class TetrisGame(private val random: Random = Random.Default) {
         return true
     }
 
-    fun startNewGame() {
+    /**
+     * 新开一局；局域网房间可传入房主下发的种子，使所有设备使用相同的 7-bag 序列。
+     * 单人模式不传种子，继续使用原有随机源。
+     */
+    fun startNewGame(seed: Int? = null) {
+        if (seed != null) {
+            random = Random(seed)
+            pieceGenerator = SevenBagGenerator(random)
+        }
         cells.forEach { it.fill(EMPTY) }
         score = 0
         lines = 0
@@ -560,7 +570,9 @@ class TetrisGame(private val random: Random = Random.Default) {
                 points = tSpinPoints,
                 combo = 0,
                 backToBackApplied = false,
-                perfectClear = false
+                perfectClear = false,
+                clearedLines = 0,
+                isTSpin = true
             )
             return
         }
@@ -591,7 +603,9 @@ class TetrisGame(private val random: Random = Random.Default) {
             points = totalPoints,
             combo = comboIndex,
             backToBackApplied = b2bApplied,
-            perfectClear = perfectClear
+            perfectClear = perfectClear,
+            clearedLines = cleared,
+            isTSpin = tSpin
         )
     }
 

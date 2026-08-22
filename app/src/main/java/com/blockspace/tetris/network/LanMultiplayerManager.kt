@@ -5,6 +5,7 @@ import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.net.wifi.WifiManager
 import com.blockspace.tetris.game.FallingPiece
+import com.blockspace.tetris.game.StandardAttackRules
 import com.blockspace.tetris.game.TetrisGame
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -23,12 +24,14 @@ import java.security.SecureRandom
 import java.util.concurrent.ConcurrentHashMap
 
 private const val SERVICE_TYPE = "_blockspace._tcp."
-private const val PROTOCOL_VERSION = "2"
+private const val PROTOCOL_VERSION = "4"
 private const val MAX_MESSAGE_LENGTH = 1_024
 private const val MAX_PLAYERS = 4
 private const val HOST_PLAYER_ID = "HOST"
 private const val HEARTBEAT_INTERVAL_MILLIS = 4_000L
 private const val HEARTBEAT_TIMEOUT_MILLIS = 12_000L
+private const val ROUNDS_TO_WIN = 3
+private const val ROUND_INTERMISSION_MILLIS = 1_200L
 
 enum class LanStatus {
     IDLE,
@@ -37,8 +40,27 @@ enum class LanStatus {
     JOINING,
     LOBBY,
     PLAYING,
+    ROUND_OVER,
     FINISHED,
     ERROR
+}
+
+/** 多人房间开始后固定，避免赛中切换规则造成双方状态不一致。 */
+enum class LanMatchMode(val wireName: String, val label: String, val description: String) {
+    RACE(
+        wireName = "RACE",
+        label = "竞速淘汰",
+        description = "默认模式：无灰色垃圾行，真实堆顶才淘汰。"
+    ),
+    STANDARD_ATTACK(
+        wireName = "ATTACK",
+        label = "标准攻击",
+        description = "可选竞技模式：消行会发送可抵消、延迟进入的灰色垃圾行。"
+    );
+
+    companion object {
+        fun fromWire(value: String?): LanMatchMode? = entries.firstOrNull { it.wireName == value }
+    }
 }
 
 data class DiscoveredRoom(
@@ -76,6 +98,11 @@ data class LanUiState(
     val localPlayerId: String? = null,
     val rooms: List<DiscoveredRoom> = emptyList(),
     val players: List<LanPlayer> = emptyList(),
+    val matchMode: LanMatchMode = LanMatchMode.RACE,
+    val matchSeed: Int? = null,
+    val roundNumber: Int = 1,
+    val roundWins: Map<String, Int> = emptyMap(),
+    val roundWinnerName: String? = null,
     val pendingGarbageLines: Int = 0,
     val winnerName: String? = null,
     val message: String = "选择“创建房间”或搜索同一 Wi‑Fi 下的房间。"
@@ -116,6 +143,15 @@ class LanMultiplayerManager(context: Context) {
     private var localFinished = false
     private var lastPublishedLockRevision = -1
     private var winnerName: String? = null
+    private var matchMode = LanMatchMode.RACE
+    private var matchSeed: Int? = null
+    private var roundNumber = 1
+    private val roundWins = LinkedHashMap<String, Int>()
+    private var roundWinnerName: String? = null
+    private var attackTargetCursor = 0
+    private val pendingGarbageBatches = ArrayDeque<PendingGarbage>()
+
+    private data class PendingGarbage(var lines: Int, val availableAtMillis: Long)
 
     private class HostPeer(val socket: Socket) {
         val reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8))
@@ -183,9 +219,11 @@ class LanMultiplayerManager(context: Context) {
         }
     }
 
-    fun hostRoom(displayName: String) {
+    fun hostRoom(displayName: String, mode: LanMatchMode = LanMatchMode.RACE) {
         synchronized(stateLock) {
             resetSessionInternal(notifyPeers = false)
+            matchMode = mode
+            matchSeed = null
             val roomName = buildRoomName(displayName)
             try {
                 val listeningSocket = ServerSocket(0).apply { reuseAddress = true }
@@ -204,7 +242,7 @@ class LanMultiplayerManager(context: Context) {
                     isHost = true,
                     localPlayerId = HOST_PLAYER_ID,
                     rooms = emptyList(),
-                    message = "房间已创建（1/$MAX_PLAYERS），等待玩家加入…"
+                    message = "${mode.label}房间已创建（1/$MAX_PLAYERS），等待玩家加入…"
                 )
                 registerRoom(roomName, listeningSocket.localPort)
                 scope.launch { acceptLoop(listeningSocket) }
@@ -275,40 +313,112 @@ class LanMultiplayerManager(context: Context) {
             matchStarted = true
             localFinished = false
             winnerName = null
+            roundWinnerName = null
+            roundNumber = 1
+            roundWins.clear()
+            roomPlayers.keys.forEach { playerId -> roundWins[playerId] = 0 }
+            matchSeed = secureRandom.nextInt()
+            attackTargetCursor = 0
+            pendingGarbageBatches.clear()
             lastPublishedLockRevision = -1
             roomPlayers.replaceAll { _, player -> player.copy(isAlive = true, snapshot = null) }
             unregisterRoomInternal()
             closeServerInternal()
-            publishState(status = LanStatus.PLAYING, message = "比赛开始，共 ${roomPlayers.size} 名玩家。")
+            publishState(status = LanStatus.PLAYING, pendingGarbageLines = 0, message = "${matchMode.label}· 第 1 局开始 · 先胜 $ROUNDS_TO_WIN 局。")
             broadcastRoster()
-            broadcastToPeers("START|${randomToken().take(8)}")
+            broadcastToPeers("START|${matchMode.wireName}|${matchSeed}")
         }
     }
 
-    /** 在游戏规则状态真正变化后调用，同步自己的可见棋盘与对手观察信息；多人模式不发送攻击。 */
+    /** 在游戏规则状态真正变化后调用，同步可见棋盘；标准攻击模式仅在锁定方块后结算一次攻击。 */
     fun publishGame(game: TetrisGame) {
         val snapshot = snapshotFrom(game)
-        if (game.lockRevision != lastPublishedLockRevision) {
-            lastPublishedLockRevision = game.lockRevision
-        }
         val localId = localPlayerId ?: return
         val shouldFinish = game.isGameOver
         synchronized(stateLock) {
             if (_uiState.value.status != LanStatus.PLAYING || localFinished) return
+            val newLock = game.lockRevision != lastPublishedLockRevision
+            if (newLock) lastPublishedLockRevision = game.lockRevision
             updatePlayerSnapshot(localId, snapshot)
             if (isHostSession) {
                 broadcastToPeers("STATE|$localId|${serializeSnapshot(snapshot)}")
             } else {
                 sendToClient("STATE|${clientConnection?.token ?: return}|${serializeSnapshot(snapshot)}")
             }
+            if (newLock && matchMode == LanMatchMode.STANDARD_ATTACK) {
+                val outgoing = StandardAttackRules.linesFor(game.lastScoreEvent)
+                val remaining = outgoing - cancelPendingGarbage(outgoing)
+                if (remaining > 0) {
+                    if (isHostSession) routeAttack(localId, remaining)
+                    else clientConnection?.token?.let { sendToClient("ATTACK|$it|$remaining") }
+                }
+            }
         }
         if (shouldFinish) markLocalEliminated()
     }
 
-    /** 多人模式采用纯竞速淘汰规则，不接收或应用灰色垃圾行。 */
+    /** 返回最早一批来袭攻击的到期时间，供规则循环精确唤醒。 */
+    fun nextPendingGarbageDelayMillis(): Long = synchronized(stateLock) {
+        if (matchMode != LanMatchMode.STANDARD_ATTACK || _uiState.value.status != LanStatus.PLAYING) return@synchronized Long.MAX_VALUE
+        pendingGarbageBatches.firstOrNull()?.availableAtMillis?.let { availableAt ->
+            (availableAt - System.currentTimeMillis()).coerceAtLeast(1L)
+        } ?: Long.MAX_VALUE
+    }
+
+    /** 仅在标准攻击模式且垃圾延迟到期后交给游戏引擎；竞速模式永远返回零。 */
     fun consumePendingGarbage(): Int = synchronized(stateLock) {
-        if (_uiState.value.pendingGarbageLines > 0) publishState(pendingGarbageLines = 0)
-        0
+        if (matchMode != LanMatchMode.STANDARD_ATTACK || _uiState.value.status != LanStatus.PLAYING) return@synchronized 0
+        val now = System.currentTimeMillis()
+        var due = 0
+        while (pendingGarbageBatches.firstOrNull()?.availableAtMillis?.let { it <= now } == true) {
+            due += pendingGarbageBatches.removeFirst().lines
+        }
+        if (due > 0) publishState(pendingGarbageLines = pendingGarbageLines())
+        due
+    }
+
+    private fun queueIncomingGarbage(lines: Int) {
+        if (matchMode != LanMatchMode.STANDARD_ATTACK || _uiState.value.status != LanStatus.PLAYING || localFinished) return
+        val safeLines = lines.coerceIn(1, StandardAttackRules.MAX_OUTGOING_LINES)
+        pendingGarbageBatches.addLast(PendingGarbage(safeLines, System.currentTimeMillis() + StandardAttackRules.GARBAGE_DELAY_MILLIS))
+        publishState(pendingGarbageLines = pendingGarbageLines(), message = "收到 $safeLines 行攻击，可通过消行抵消。")
+    }
+
+    private fun cancelPendingGarbage(outgoing: Int): Int {
+        if (outgoing <= 0 || pendingGarbageBatches.isEmpty()) return 0
+        var remaining = outgoing
+        var cancelled = 0
+        val iterator = pendingGarbageBatches.iterator()
+        while (iterator.hasNext() && remaining > 0) {
+            val batch = iterator.next()
+            val consumed = minOf(remaining, batch.lines)
+            batch.lines -= consumed
+            remaining -= consumed
+            cancelled += consumed
+            if (batch.lines == 0) iterator.remove()
+        }
+        if (cancelled > 0) publishState(pendingGarbageLines = pendingGarbageLines(), message = "抵消 $cancelled 行来袭攻击。")
+        return cancelled
+    }
+
+    private fun pendingGarbageLines(): Int = pendingGarbageBatches.sumOf { it.lines }
+
+    private fun routeAttack(attackerId: String, lines: Int) {
+        if (matchMode != LanMatchMode.STANDARD_ATTACK || lines <= 0) return
+        val targetId = nextAttackTarget(attackerId) ?: return
+        if (targetId == HOST_PLAYER_ID) {
+            queueIncomingGarbage(lines)
+        } else {
+            hostPeers[targetId]?.let { sendToPeer(it, "GARBAGE|$lines") }
+        }
+    }
+
+    private fun nextAttackTarget(attackerId: String): String? {
+        val candidates = roomPlayers.values.filter { it.isAlive && it.id != attackerId }.map { it.id }.sorted()
+        if (candidates.isEmpty()) return null
+        val target = candidates[attackTargetCursor % candidates.size]
+        attackTargetCursor = (attackTargetCursor + 1) % candidates.size
+        return target
     }
 
     fun close() = synchronized(stateLock) {
@@ -445,7 +555,7 @@ class LanMultiplayerManager(context: Context) {
                     pendingHostPeers.remove(peer)
                     hostPeers[id] = peer
                     roomPlayers[id] = LanPlayer(id, name, isHost = false)
-                    sendToPeer(peer, "WELCOME|${peer.token}|$id")
+                    sendToPeer(peer, "WELCOME|${peer.token}|$id|${matchMode.wireName}")
                     publishState(status = LanStatus.LOBBY, message = "已有 ${roomPlayers.size}/$MAX_PLAYERS 名玩家，可由房主开始比赛。")
                     broadcastRoster()
                 }
@@ -462,8 +572,11 @@ class LanMultiplayerManager(context: Context) {
                     }
                 }
             }
-            // v1.22.1 起多人比赛采用纯竞速淘汰规则；忽略旧客户端的攻击消息。
-            "ATTACK" -> Unit
+            "ATTACK" -> {
+                if (!validateHostToken(peer, parts, 3) || matchMode != LanMatchMode.STANDARD_ATTACK) return
+                val lines = parts[2].toIntOrNull()?.coerceIn(0, StandardAttackRules.MAX_OUTGOING_LINES) ?: return
+                if (lines > 0) synchronized(stateLock) { routeAttack(peer.id ?: return@synchronized, lines) }
+            }
             "FINISH" -> {
                 if (!validateHostToken(peer, parts, 2)) return
                 synchronized(stateLock) { eliminatePlayer(peer.id ?: return) }
@@ -475,12 +588,14 @@ class LanMultiplayerManager(context: Context) {
     }
 
     private fun handleClientLine(connection: ClientConnection, line: String) {
-        val parts = line.split('|', limit = 4)
+        val parts = line.split('|', limit = 5)
         when (parts.firstOrNull()) {
             "WELCOME" -> {
-                if (parts.size == 3 && parts[1].length in 8..40 && parts[2] == localPlayerId) {
+                val mode = LanMatchMode.fromWire(parts.getOrNull(3))
+                if (parts.size == 4 && parts[1].length in 8..40 && parts[2] == localPlayerId && mode != null) {
                     connection.token = parts[1]
-                    publishState(status = LanStatus.LOBBY, message = "已加入房间，等待房主开始比赛。")
+                    matchMode = mode
+                    publishState(status = LanStatus.LOBBY, message = "已加入${mode.label}房间，等待房主开始比赛。")
                 }
             }
             "ROSTER" -> if (parts.size == 2) {
@@ -489,19 +604,30 @@ class LanMultiplayerManager(context: Context) {
                         roomPlayers.clear()
                         players.forEach { roomPlayers[it.id] = it }
                         publishState(
-                            status = if (matchStarted) LanStatus.PLAYING else LanStatus.LOBBY,
-                            message = if (matchStarted) "比赛进行中。" else "房间已有 ${players.size}/$MAX_PLAYERS 名玩家，等待房主开始。"
+                            status = if (matchStarted && _uiState.value.status != LanStatus.ROUND_OVER) LanStatus.PLAYING else _uiState.value.status,
+                            message = if (matchStarted) _uiState.value.message else "房间已有 ${players.size}/$MAX_PLAYERS 名玩家，等待房主开始。"
                         )
                     }
                 }
             }
-            "START" -> if (parts.size == 2 && connection.token != null) {
-                synchronized(stateLock) {
-                    matchStarted = true
-                    localFinished = false
-                    winnerName = null
-                    lastPublishedLockRevision = -1
-                    publishState(status = LanStatus.PLAYING, winnerName = null, message = "比赛开始，共 ${roomPlayers.size} 名玩家。")
+            "START" -> {
+                val mode = LanMatchMode.fromWire(parts.getOrNull(1))
+                val seed = parts.getOrNull(2)?.toIntOrNull()
+                if (parts.size == 3 && connection.token != null && mode != null && seed != null) {
+                    synchronized(stateLock) {
+                        matchMode = mode
+                        matchSeed = seed
+                        matchStarted = true
+                        localFinished = false
+                        winnerName = null
+                        roundWinnerName = null
+                        roundNumber = 1
+                        roundWins.clear()
+                        roomPlayers.keys.forEach { playerId -> roundWins[playerId] = 0 }
+                        lastPublishedLockRevision = -1
+                        pendingGarbageBatches.clear()
+                        publishState(status = LanStatus.PLAYING, winnerName = null, roundWinnerName = null, pendingGarbageLines = 0, message = "${mode.label}· 第 1 局开始 · 先胜 $ROUNDS_TO_WIN 局。")
+                    }
                 }
             }
             "STATE" -> if (parts.size == 3) {
@@ -511,20 +637,68 @@ class LanMultiplayerManager(context: Context) {
                     }
                 }
             }
-            // 兼容旧房主消息：多人比赛不显示也不应用灰色垃圾行。
-            "GARBAGE" -> Unit
+            "GARBAGE" -> {
+                if (parts.size == 2) parts[1].toIntOrNull()?.let { lines -> synchronized(stateLock) { queueIncomingGarbage(lines) } }
+            }
             "ELIM" -> if (parts.size == 2) synchronized(stateLock) { markEliminatedInState(parts[1]) }
+            "ROUND_RESULT" -> if (parts.size == 3) synchronized(stateLock) {
+                if (_uiState.value.status == LanStatus.FINISHED) return@synchronized
+                parseRoundWins(parts[2])?.let { scores ->
+                    roundWins.clear()
+                    roundWins.putAll(scores)
+                    val winner = roomPlayers[parts[1]]?.name ?: "无人"
+                    roundWinnerName = winner
+                    localFinished = true
+                    pendingGarbageBatches.clear()
+                    publishState(
+                        status = LanStatus.ROUND_OVER,
+                        roundWinnerName = winner,
+                        pendingGarbageLines = 0,
+                        message = "第 $roundNumber 局胜者：$winner。即将开始下一局。"
+                    )
+                }
+            }
+            "NEXT_ROUND" -> {
+                val mode = LanMatchMode.fromWire(parts.getOrNull(1))
+                val seed = parts.getOrNull(2)?.toIntOrNull()
+                val nextRound = parts.getOrNull(3)?.toIntOrNull()
+                val scores = parseRoundWins(parts.getOrNull(4).orEmpty())
+                if (parts.size == 5 && mode != null && seed != null && nextRound != null && scores != null) synchronized(stateLock) {
+                    matchMode = mode
+                    matchSeed = seed
+                    roundNumber = nextRound.coerceAtLeast(1)
+                    roundWins.clear()
+                    roundWins.putAll(scores)
+                    roomPlayers.replaceAll { _, player -> player.copy(isAlive = true, snapshot = null) }
+                    localFinished = false
+                    roundWinnerName = null
+                    lastPublishedLockRevision = -1
+                    pendingGarbageBatches.clear()
+                    publishState(
+                        status = LanStatus.PLAYING,
+                        roundWinnerName = null,
+                        pendingGarbageLines = 0,
+                        message = "${mode.label}· 第 $roundNumber 局开始 · 先胜 $ROUNDS_TO_WIN 局。"
+                    )
+                }
+            }
             "RESULT" -> if (parts.size == 2) synchronized(stateLock) {
                 val winner = roomPlayers[parts[1]]?.name ?: "未命名玩家"
+                matchStarted = false
                 winnerName = winner
-                publishState(status = LanStatus.FINISHED, winnerName = winner, message = "比赛结束，胜者：$winner")
+                roundWinnerName = winner
+                publishState(status = LanStatus.FINISHED, winnerName = winner, roundWinnerName = winner, message = "比赛结束，胜者：$winner")
             }
             "ABORT" -> synchronized(stateLock) {
                 matchStarted = false
                 winnerName = null
                 localFinished = false
                 closeClientInternal(notifyHost = false)
-                publishState(status = LanStatus.ERROR, winnerName = null, pendingGarbageLines = 0, message = parts.getOrNull(1) ?: "有玩家连接中断，本局比赛已取消。")
+                matchSeed = null
+                roundWinnerName = null
+                roundWins.clear()
+                pendingGarbageBatches.clear()
+                publishState(status = LanStatus.ERROR, winnerName = null, matchSeed = null, roundWinnerName = null, roundWins = emptyMap(), pendingGarbageLines = 0, message = parts.getOrNull(1) ?: "有玩家连接中断，本局比赛已取消。")
             }
             "REJECT" -> {
                 val reason = parts.getOrNull(1) ?: "房主拒绝了连接。"
@@ -557,6 +731,7 @@ class LanMultiplayerManager(context: Context) {
     }
 
     private fun eliminatePlayer(playerId: String) {
+        if (_uiState.value.status != LanStatus.PLAYING) return
         val player = roomPlayers[playerId] ?: return
         if (!player.isAlive) return
         roomPlayers[playerId] = player.copy(isAlive = false)
@@ -564,13 +739,78 @@ class LanMultiplayerManager(context: Context) {
         publishState(message = "${player.name} 已淘汰。")
         val survivors = roomPlayers.values.filter { it.isAlive }
         if (survivors.size <= 1) {
-            val winner = survivors.firstOrNull()?.name ?: "无人"
-            winnerName = winner
-            publishState(status = LanStatus.FINISHED, winnerName = winner, message = "比赛结束，胜者：$winner")
-            broadcastToPeers("RESULT|${survivors.firstOrNull()?.id ?: "NONE"}")
+            finishRound(survivors.firstOrNull()?.id)
         } else {
             broadcastRoster()
         }
+    }
+
+    private fun finishRound(winnerId: String?) {
+        val roundWinner = winnerId?.let { roomPlayers[it]?.name } ?: "无人"
+        roundWinnerName = roundWinner
+        localFinished = true
+        pendingGarbageBatches.clear()
+        val wins = winnerId?.let { id -> (roundWins[id] ?: 0) + 1 } ?: 0
+        if (winnerId != null) roundWins[winnerId] = wins
+        val scoreWire = serializeRoundWins()
+        broadcastToPeers("ROUND_RESULT|${winnerId ?: "NONE"}|$scoreWire")
+        if (winnerId != null && wins >= ROUNDS_TO_WIN) {
+            matchStarted = false
+            winnerName = roundWinner
+            publishState(
+                status = LanStatus.FINISHED,
+                winnerName = roundWinner,
+                roundWinnerName = roundWinner,
+                pendingGarbageLines = 0,
+                message = "比赛结束，$roundWinner 以 $wins 胜获得最终胜利。"
+            )
+            broadcastToPeers("RESULT|$winnerId")
+            return
+        }
+        publishState(
+            status = LanStatus.ROUND_OVER,
+            roundWinnerName = roundWinner,
+            pendingGarbageLines = 0,
+            message = "第 $roundNumber 局胜者：$roundWinner。即将开始下一局。"
+        )
+        scope.launch {
+            delay(ROUND_INTERMISSION_MILLIS)
+            synchronized(stateLock) { startNextRound() }
+        }
+    }
+
+    private fun startNextRound() {
+        if (!matchStarted || _uiState.value.status != LanStatus.ROUND_OVER) return
+        roundNumber++
+        roundWinnerName = null
+        localFinished = false
+        matchSeed = secureRandom.nextInt()
+        attackTargetCursor = 0
+        pendingGarbageBatches.clear()
+        lastPublishedLockRevision = -1
+        roomPlayers.replaceAll { _, player -> player.copy(isAlive = true, snapshot = null) }
+        publishState(
+            status = LanStatus.PLAYING,
+            pendingGarbageLines = 0,
+            message = "${matchMode.label}· 第 $roundNumber 局开始 · 先胜 $ROUNDS_TO_WIN 局。"
+        )
+        broadcastRoster()
+        broadcastToPeers("NEXT_ROUND|${matchMode.wireName}|${matchSeed}|$roundNumber|${serializeRoundWins()}")
+    }
+
+    private fun serializeRoundWins(): String = roomPlayers.keys.joinToString(",") { id -> "$id:${roundWins[id] ?: 0}" }
+
+    private fun parseRoundWins(payload: String): Map<String, Int>? {
+        if (payload.isBlank()) return emptyMap()
+        val parsed = LinkedHashMap<String, Int>()
+        payload.split(',').forEach { entry ->
+            val pair = entry.split(':', limit = 2)
+            val id = sanitizeIdentifier(pair.getOrNull(0).orEmpty())
+            val wins = pair.getOrNull(1)?.toIntOrNull()
+            if (id.isBlank() || wins == null || wins !in 0..ROUNDS_TO_WIN) return null
+            parsed[id] = wins
+        }
+        return parsed.takeIf { it.size == roomPlayers.size && it.keys.containsAll(roomPlayers.keys) }
     }
 
     private fun removeHostPeer(peer: HostPeer, reason: String) {
@@ -592,8 +832,12 @@ class LanMultiplayerManager(context: Context) {
         matchStarted = false
         localFinished = false
         winnerName = null
+        matchSeed = null
+        roundWinnerName = null
+        roundWins.clear()
+        pendingGarbageBatches.clear()
         broadcastToPeers("ABORT|$reason")
-        publishState(status = LanStatus.ERROR, winnerName = null, pendingGarbageLines = 0, message = reason)
+        publishState(status = LanStatus.ERROR, winnerName = null, matchSeed = null, roundWinnerName = null, roundWins = emptyMap(), pendingGarbageLines = 0, message = reason)
     }
 
     private fun rejectPeer(peer: HostPeer, reason: String) {
@@ -744,7 +988,7 @@ class LanMultiplayerManager(context: Context) {
         unregisterRoomInternal()
         val listener = object : NsdManager.RegistrationListener {
             override fun onServiceRegistered(serviceInfo: NsdServiceInfo) {
-                publishState(roomName = serviceInfo.serviceName, message = "房间已创建（1/$MAX_PLAYERS），等待玩家加入…")
+                publishState(roomName = serviceInfo.serviceName, message = "${matchMode.label}房间已创建（1/$MAX_PLAYERS），等待玩家加入…")
             }
 
             override fun onRegistrationFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
@@ -817,6 +1061,13 @@ class LanMultiplayerManager(context: Context) {
         localFinished = false
         winnerName = null
         lastPublishedLockRevision = -1
+        matchMode = LanMatchMode.RACE
+        matchSeed = null
+        roundNumber = 1
+        roundWins.clear()
+        roundWinnerName = null
+        attackTargetCursor = 0
+        pendingGarbageBatches.clear()
     }
 
     private fun acquireMulticastLock() {
@@ -841,6 +1092,11 @@ class LanMultiplayerManager(context: Context) {
         localPlayerId: String? = this.localPlayerId,
         rooms: List<DiscoveredRoom> = _uiState.value.rooms,
         players: List<LanPlayer> = roomPlayers.values.toList(),
+        matchMode: LanMatchMode = this.matchMode,
+        matchSeed: Int? = this.matchSeed,
+        roundNumber: Int = this.roundNumber,
+        roundWins: Map<String, Int> = this.roundWins.toMap(),
+        roundWinnerName: String? = this.roundWinnerName,
         pendingGarbageLines: Int = _uiState.value.pendingGarbageLines,
         winnerName: String? = this.winnerName,
         message: String = _uiState.value.message
@@ -852,6 +1108,11 @@ class LanMultiplayerManager(context: Context) {
             localPlayerId = localPlayerId,
             rooms = rooms,
             players = players,
+            matchMode = matchMode,
+            matchSeed = matchSeed,
+            roundNumber = roundNumber,
+            roundWins = roundWins,
+            roundWinnerName = roundWinnerName,
             pendingGarbageLines = pendingGarbageLines,
             winnerName = winnerName,
             message = message

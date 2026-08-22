@@ -90,6 +90,7 @@ import com.blockspace.tetris.audio.GameSoundEffect
 import com.blockspace.tetris.audio.GameSoundPlayer
 import com.blockspace.tetris.game.FallingPiece
 import com.blockspace.tetris.network.LanLobbyScreen
+import com.blockspace.tetris.network.LanMatchMode
 import com.blockspace.tetris.network.LanMultiplayerManager
 import com.blockspace.tetris.network.LanStatus
 import com.blockspace.tetris.network.OpponentPanel
@@ -133,6 +134,7 @@ fun TetrisApp() {
     var hasStarted by rememberSaveable { mutableStateOf(false) }
     var showLanLobby by rememberSaveable { mutableStateOf(false) }
     var lanMatchStarted by rememberSaveable { mutableStateOf(false) }
+    var appliedLanRoundSeed by rememberSaveable { mutableStateOf<Int?>(null) }
     var showControlSettings by rememberSaveable { mutableStateOf(false) }
     val lanManager = remember(context) { LanMultiplayerManager(context.applicationContext) }
     val lanState by lanManager.uiState.collectAsState()
@@ -189,16 +191,26 @@ fun TetrisApp() {
     }
 
     fun updateControlSettings(next: ControlSettings) {
-        game.setFallSpeed(next.fallSpeed)
-        game.setPieceRandomizerMode(next.pieceRandomizer)
         controlSettings = next
         controlSettingsStore.save(next)
+        if (showLanLobby && lanMatchStarted && lanState.status == LanStatus.PLAYING) {
+            game.setFallSpeed(FallSpeedPreset.STANDARD)
+            game.setPieceRandomizerMode(PieceRandomizerMode.SEVEN_BAG)
+        } else {
+            game.setFallSpeed(next.fallSpeed)
+            game.setPieceRandomizerMode(next.pieceRandomizer)
+        }
         timingRevision++
     }
 
-    LaunchedEffect(game, controlSettings.fallSpeed, controlSettings.pieceRandomizer) {
-        game.setFallSpeed(controlSettings.fallSpeed)
-        game.setPieceRandomizerMode(controlSettings.pieceRandomizer)
+    LaunchedEffect(game, controlSettings.fallSpeed, controlSettings.pieceRandomizer, showLanLobby, lanMatchStarted, lanState.status) {
+        if (showLanLobby && lanMatchStarted && lanState.status == LanStatus.PLAYING) {
+            game.setFallSpeed(FallSpeedPreset.STANDARD)
+            game.setPieceRandomizerMode(PieceRandomizerMode.SEVEN_BAG)
+        } else {
+            game.setFallSpeed(controlSettings.fallSpeed)
+            game.setPieceRandomizerMode(controlSettings.pieceRandomizer)
+        }
     }
 
     LaunchedEffect(game, hasStarted, appIsActive, timingRevision, lanState.status, lanState.pendingGarbageLines) {
@@ -214,7 +226,10 @@ fun TetrisApp() {
             return@LaunchedEffect
         }
 
-        val wakeDelayMillis = game.nextRuleEventDelayMillis()
+        val wakeDelayMillis = minOf(
+            game.nextRuleEventDelayMillis(),
+            lanManager.nextPendingGarbageDelayMillis()
+        )
         val startedAtNanos = System.nanoTime()
         delay(wakeDelayMillis)
         val elapsedMillis = ((System.nanoTime() - startedAtNanos) / 1_000_000L)
@@ -239,24 +254,27 @@ fun TetrisApp() {
         timingRevision++
     }
 
-    LaunchedEffect(showLanLobby, lanState.status, lanMatchStarted) {
-        if (showLanLobby && lanState.status == LanStatus.PLAYING && !lanMatchStarted) {
-            updateGame {
-                game.setPieceRandomizerMode(controlSettings.pieceRandomizer)
-                game.startNewGame()
+    LaunchedEffect(showLanLobby, lanState.status, lanState.matchSeed, lanState.roundNumber, appliedLanRoundSeed) {
+        val seed = lanState.matchSeed
+        if (showLanLobby && lanState.status == LanStatus.PLAYING && seed != null && seed != appliedLanRoundSeed) {
+            updateGame(allowWhenGameOver = true) {
+                game.setFallSpeed(FallSpeedPreset.STANDARD)
+                game.setPieceRandomizerMode(PieceRandomizerMode.SEVEN_BAG)
+                game.startNewGame(seed)
                 soundPlayer.play(GameSoundEffect.START)
                 true
             }
             hasStarted = true
             lanMatchStarted = true
+            appliedLanRoundSeed = seed
         }
     }
 
     when {
-        showLanLobby && lanState.status !in setOf(LanStatus.PLAYING, LanStatus.FINISHED) -> {
+        showLanLobby && lanState.status !in setOf(LanStatus.PLAYING, LanStatus.ROUND_OVER, LanStatus.FINISHED) -> {
             LanLobbyScreen(
                 state = lanState,
-                onCreateRoom = { lanManager.hostRoom("PLAYER") },
+                onCreateRoom = { mode -> lanManager.hostRoom("PLAYER", mode) },
                 onRefresh = { lanManager.startDiscovery() },
                 onJoinRoom = lanManager::joinRoom,
                 onStartMatch = lanManager::startMatch,
@@ -264,6 +282,7 @@ fun TetrisApp() {
                     lanManager.close()
                     showLanLobby = false
                     lanMatchStarted = false
+                    appliedLanRoundSeed = null
                 }
             )
         }
@@ -280,6 +299,7 @@ fun TetrisApp() {
                 },
                 onLanBattle = {
                     lanMatchStarted = false
+                    appliedLanRoundSeed = null
                     showLanLobby = true
                     lanManager.startDiscovery()
                 }
@@ -290,13 +310,20 @@ fun TetrisApp() {
                 GameScreen(
                 game = game,
                 revision = revision,
-                isLanBattle = showLanLobby && lanMatchStarted && lanState.status in setOf(LanStatus.PLAYING, LanStatus.FINISHED),
+                isLanBattle = showLanLobby && lanMatchStarted && lanState.status in setOf(LanStatus.PLAYING, LanStatus.ROUND_OVER, LanStatus.FINISHED),
                 opponents = lanState.remotePlayers,
                 matchWinnerName = lanState.winnerName,
+                isRoundOver = lanState.status == LanStatus.ROUND_OVER,
+                roundWinnerName = lanState.roundWinnerName,
+                roundNumber = lanState.roundNumber,
+                roundWins = lanState.roundWins,
+                lanMatchMode = if (showLanLobby && lanMatchStarted) lanState.matchMode else null,
+                pendingGarbageLines = lanState.pendingGarbageLines,
                 onExitLanMatch = {
                     lanManager.close()
                     showLanLobby = false
                     lanMatchStarted = false
+                    appliedLanRoundSeed = null
                 },
                 onMoveLeft = {
                     updateGame {
@@ -335,10 +362,12 @@ fun TetrisApp() {
                     }
                 },
                 onRestart = {
-                    updateGame(allowWhenGameOver = true) {
-                        game.startNewGame()
-                        soundPlayer.play(GameSoundEffect.START)
-                        true
+                    if (!(showLanLobby && lanMatchStarted)) {
+                        updateGame(allowWhenGameOver = true) {
+                            game.startNewGame()
+                            soundPlayer.play(GameSoundEffect.START)
+                            true
+                        }
                     }
                 },
                 controlSettings = controlSettings,
@@ -359,6 +388,7 @@ fun TetrisApp() {
                     }
                     lanManager.close()
                     lanMatchStarted = false
+                    appliedLanRoundSeed = null
                     showLanLobby = true
                     lanManager.startDiscovery()
                 }
@@ -451,6 +481,12 @@ private fun GameScreen(
     isLanBattle: Boolean,
     opponents: List<LanPlayer>,
     matchWinnerName: String?,
+    isRoundOver: Boolean,
+    roundWinnerName: String?,
+    roundNumber: Int,
+    roundWins: Map<String, Int>,
+    lanMatchMode: LanMatchMode?,
+    pendingGarbageLines: Int,
     onExitLanMatch: () -> Unit,
     onMoveLeft: () -> Unit,
     onMoveRight: () -> Unit,
@@ -498,7 +534,10 @@ private fun GameScreen(
                 eventPoints = scoreEvent?.points ?: 0,
                 combo = game.combo,
                 b2bReady = game.isBackToBack,
-                fallSpeed = controlSettings.fallSpeed
+                fallSpeed = if (isLanBattle) FallSpeedPreset.STANDARD else controlSettings.fallSpeed,
+                lanMatchMode = lanMatchMode,
+                pendingGarbageLines = pendingGarbageLines,
+                roundSummary = if (isLanBattle) "第 $roundNumber 局 · FT3 · ${roundWins.values.joinToString(":")}" else null
             )
             Spacer(Modifier.height(5.dp))
 
@@ -555,6 +594,12 @@ private fun GameScreen(
                                 buttonLabel = "退出比赛",
                                 onClick = onExitLanMatch
                             )
+                            isLanBattle && isRoundOver -> GameOverlay(
+                                title = "第 $roundNumber 局结束",
+                                subtitle = "本局胜者：${roundWinnerName ?: "无人"} · 即将开始下一局",
+                                buttonLabel = "退出比赛",
+                                onClick = onExitLanMatch
+                            )
                             isLanBattle && game.isGameOver -> GameOverlay(
                                 title = "已淘汰",
                                 subtitle = "等待其他玩家完成比赛",
@@ -599,7 +644,7 @@ private fun GameScreen(
                 .fillMaxWidth()
                 .height(132.dp)
                 .padding(horizontal = 6.dp),
-            gameOver = game.isGameOver,
+            gameOver = game.isGameOver || isRoundOver || matchWinnerName != null,
             controlSettings = controlSettings,
             isEditing = isEditingControls,
             onControlSettingsChange = onControlSettingsChange,
@@ -973,7 +1018,10 @@ private fun ScoreBanner(
     eventPoints: Int,
     combo: Int,
     b2bReady: Boolean,
-    fallSpeed: FallSpeedPreset
+    fallSpeed: FallSpeedPreset,
+    lanMatchMode: LanMatchMode?,
+    pendingGarbageLines: Int,
+    roundSummary: String?
 ) {
     val displayedScore by animateIntAsState(
         targetValue = score,
@@ -1012,10 +1060,24 @@ private fun ScoreBanner(
             color = Color.White
         )
         Text(
-            "速度 ×${fallSpeed.gravityMultiplier} · 挑战分 ×${fallSpeed.challengeScoreMultiplier}",
+            if (lanMatchMode == null) {
+                "速度 ×${fallSpeed.gravityMultiplier} · 挑战分 ×${fallSpeed.challengeScoreMultiplier}"
+            } else {
+                "联机：${lanMatchMode.label} · 固定 7-Bag · 标准重力"
+            },
             style = MaterialTheme.typography.labelLarge,
             color = Color(0xFFBCE6FF)
         )
+        roundSummary?.let { summary ->
+            Text(summary, style = MaterialTheme.typography.labelLarge, color = Color(0xFF86EEBB))
+        }
+        if (lanMatchMode == LanMatchMode.STANDARD_ATTACK && pendingGarbageLines > 0) {
+            Text(
+                "来袭攻击 $pendingGarbageLines 行 · 立即消行可抵消",
+                style = MaterialTheme.typography.labelLarge,
+                color = Color(0xFFFFD38A)
+            )
+        }
         when {
             eventTitle != null && eventAlpha > 0.01f -> Text(
                 "$eventTitle  +$eventPoints",

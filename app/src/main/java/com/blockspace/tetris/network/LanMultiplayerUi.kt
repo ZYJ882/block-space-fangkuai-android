@@ -48,7 +48,7 @@ private const val RoomCapacity = 4
 @Composable
 fun LanLobbyScreen(
     state: LanUiState,
-    onCreateRoom: () -> Unit,
+    onCreateRoom: (LanMatchMode) -> Unit,
     onRefresh: () -> Unit,
     onJoinRoom: (DiscoveredRoom) -> Unit,
     onStartMatch: () -> Unit,
@@ -118,6 +118,18 @@ private fun MultiPlayerWaitingRoom(
                 style = MaterialTheme.typography.titleMedium,
                 color = Color(0xFFFFD38A)
             )
+            Text(
+                "规则：${state.matchMode.label} · 固定 7-Bag",
+                style = MaterialTheme.typography.labelLarge,
+                color = Color(0xFFCBECFF),
+                textAlign = TextAlign.Center
+            )
+            Text(
+                state.matchMode.description,
+                style = MaterialTheme.typography.labelMedium,
+                color = Color(0xFFB9DDF6),
+                textAlign = TextAlign.Center
+            )
             PlayerRoster(state.players)
             if (state.isHost) {
                 Button(
@@ -169,18 +181,38 @@ private fun PlayerRoster(players: List<LanPlayer>) {
 @Composable
 private fun ColumnScope.RoomBrowser(
     state: LanUiState,
-    onCreateRoom: () -> Unit,
+    onCreateRoom: (LanMatchMode) -> Unit,
     onRefresh: () -> Unit,
     onJoinRoom: (DiscoveredRoom) -> Unit,
     onBack: () -> Unit
 ) {
-    Button(
-        onClick = onCreateRoom,
-        modifier = Modifier.fillMaxWidth().height(54.dp),
-        shape = RoundedCornerShape(16.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFA319))
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = LanPanelLight),
+        shape = RoundedCornerShape(16.dp)
     ) {
-        Text("创建多人局域网房间", style = MaterialTheme.typography.titleMedium)
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text("选择房间规则", style = MaterialTheme.typography.titleMedium, color = Color.White)
+            Button(
+                onClick = { onCreateRoom(LanMatchMode.RACE) },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(13.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFA319))
+            ) {
+                Text("创建竞速淘汰房间（默认）", style = MaterialTheme.typography.titleMedium)
+            }
+            Text("无灰色垃圾行 · 固定 7-Bag · 真实堆顶才淘汰", style = MaterialTheme.typography.labelMedium, color = Color(0xFFFFE0A5))
+            OutlinedButton(
+                onClick = { onCreateRoom(LanMatchMode.STANDARD_ATTACK) },
+                modifier = Modifier.fillMaxWidth().height(44.dp)
+            ) {
+                Text("创建标准攻击房间", style = MaterialTheme.typography.labelLarge)
+            }
+            Text("可选竞技规则：消行可发送并抵消延迟垃圾行", style = MaterialTheme.typography.labelMedium, color = Color(0xFFB9DDF6))
+        }
     }
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text("搜索房间", style = MaterialTheme.typography.titleMedium, color = Color.White)
