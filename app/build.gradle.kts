@@ -12,8 +12,8 @@ android {
         applicationId = "com.blockspace.tetris"
         minSdk = 26
         targetSdk = 35
-        versionCode = 34
-        versionName = "1.21.1"
+        versionCode = 35
+        versionName = "1.22.0"
     }
 
     buildFeatures {

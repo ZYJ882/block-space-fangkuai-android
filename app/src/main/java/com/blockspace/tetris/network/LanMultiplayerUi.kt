@@ -42,6 +42,7 @@ private val LanPanelLight = Color(0xFF0C5EAE)
 private val LanStroke = Color(0xFF5DB9FF)
 private val LanGhost = Color(0xFFB6D7F4)
 private val GarbageColor = Color(0xFF64748B)
+private const val RoomCapacity = 4
 
 @Composable
 fun LanLobbyScreen(
@@ -49,6 +50,7 @@ fun LanLobbyScreen(
     onCreateRoom: () -> Unit,
     onRefresh: () -> Unit,
     onJoinRoom: (DiscoveredRoom) -> Unit,
+    onStartMatch: () -> Unit,
     onBack: () -> Unit
 ) {
     Column(
@@ -59,8 +61,8 @@ fun LanLobbyScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text("局域网对战", style = MaterialTheme.typography.headlineMedium, color = Color.White)
-        Text("LAN BATTLE", style = MaterialTheme.typography.labelLarge, color = Color(0xFFB9E7FF))
+        Text("局域网多人比赛", style = MaterialTheme.typography.headlineMedium, color = Color.White)
+        Text("LAN MULTIPLAYER · 最多 4 人", style = MaterialTheme.typography.labelLarge, color = Color(0xFFB9E7FF))
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = LanPanel),
@@ -70,13 +72,9 @@ fun LanLobbyScreen(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                Text(state.message, style = MaterialTheme.typography.bodyMedium, color = Color(0xFFD8EEFF))
                 Text(
-                    state.message,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = Color(0xFFD8EEFF)
-                )
-                Text(
-                    "仅使用同一 Wi‑Fi 或手机热点；不需要互联网、账号或云端服务器。",
+                    "创建者为房主，可在至少两人加入后开始比赛；其他玩家可搜索房间后加入。仅使用同一 Wi‑Fi 或手机热点。",
                     style = MaterialTheme.typography.labelMedium,
                     color = Color(0xFF9CCBF0)
                 )
@@ -84,15 +82,18 @@ fun LanLobbyScreen(
         }
 
         when (state.status) {
-            LanStatus.CONNECTED -> Text("双方已准备好，正在进入对局…", color = Color(0xFF91F6C0))
-            LanStatus.HOSTING, LanStatus.JOINING -> WaitingRoomCard(state, onBack)
+            LanStatus.HOSTING, LanStatus.JOINING, LanStatus.LOBBY -> MultiPlayerWaitingRoom(state, onStartMatch, onBack)
             else -> RoomBrowser(state, onCreateRoom, onRefresh, onJoinRoom, onBack)
         }
     }
 }
 
 @Composable
-private fun WaitingRoomCard(state: LanUiState, onBack: () -> Unit) {
+private fun MultiPlayerWaitingRoom(
+    state: LanUiState,
+    onStartMatch: () -> Unit,
+    onBack: () -> Unit
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = LanPanelLight),
@@ -103,12 +104,63 @@ private fun WaitingRoomCard(state: LanUiState, onBack: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(if (state.isHost) "房间已创建" else "正在连接", style = MaterialTheme.typography.titleLarge, color = Color.White)
+            Text(
+                if (state.isHost) "多人房间已创建" else "已加入多人房间",
+                style = MaterialTheme.typography.titleLarge,
+                color = Color.White
+            )
             state.roomName?.let {
                 Text(it, style = MaterialTheme.typography.labelLarge, color = Color(0xFFCBECFF), textAlign = TextAlign.Center)
             }
-            Text("请保持应用在前台，并让对手连接到同一 Wi‑Fi 或热点。", style = MaterialTheme.typography.bodyMedium, color = Color(0xFFE0F3FF), textAlign = TextAlign.Center)
-            OutlinedButton(onClick = onBack) { Text("取消并返回") }
+            Text(
+                "参赛者 ${state.players.size}/$RoomCapacity",
+                style = MaterialTheme.typography.titleMedium,
+                color = Color(0xFFFFD38A)
+            )
+            PlayerRoster(state.players)
+            if (state.isHost) {
+                Button(
+                    onClick = onStartMatch,
+                    enabled = state.players.size >= 2,
+                    modifier = Modifier.fillMaxWidth().height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFA319))
+                ) {
+                    Text(
+                        if (state.players.size >= 2) "开始多人比赛" else "至少等待 1 名玩家加入",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            } else {
+                Text("等待房主开始比赛…", style = MaterialTheme.typography.bodyMedium, color = Color(0xFFE0F3FF))
+            }
+            OutlinedButton(onClick = onBack, modifier = Modifier.fillMaxWidth()) { Text("退出房间") }
+        }
+    }
+}
+
+@Composable
+private fun PlayerRoster(players: List<LanPlayer>) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        players.forEachIndexed { index, player ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF0A4B92), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("${index + 1}. ${player.name}", color = Color.White, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    if (player.isHost) "房主" else "已加入",
+                    color = if (player.isHost) Color(0xFFFFD38A) else Color(0xFFBDE7FF),
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
         }
     }
 }
@@ -127,11 +179,11 @@ private fun ColumnScope.RoomBrowser(
         shape = RoundedCornerShape(16.dp),
         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFA319))
     ) {
-        Text("创建局域网房间", style = MaterialTheme.typography.titleMedium)
+        Text("创建多人局域网房间", style = MaterialTheme.typography.titleMedium)
     }
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text("搜索到的房间", style = MaterialTheme.typography.titleMedium, color = Color.White)
-        OutlinedButton(onClick = onRefresh) { Text("刷新") }
+        Text("搜索房间", style = MaterialTheme.typography.titleMedium, color = Color.White)
+        OutlinedButton(onClick = onRefresh) { Text("刷新搜索") }
     }
     Card(
         modifier = Modifier.fillMaxWidth().weight(1f),
@@ -140,7 +192,7 @@ private fun ColumnScope.RoomBrowser(
     ) {
         if (state.rooms.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize().padding(20.dp), contentAlignment = Alignment.Center) {
-                Text("暂未发现房间\n请确认两台设备在同一局域网。", color = Color(0xFFB9DDF6), textAlign = TextAlign.Center)
+                Text("暂未发现房间\n请确认所有设备在同一局域网。", color = Color(0xFFB9DDF6), textAlign = TextAlign.Center)
             }
         } else {
             Column(
@@ -148,10 +200,7 @@ private fun ColumnScope.RoomBrowser(
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 state.rooms.forEach { room ->
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = Color(0xFF0D4D97)),
-                        shape = RoundedCornerShape(12.dp)
-                    ) {
+                    Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF0D4D97)), shape = RoundedCornerShape(12.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -170,7 +219,7 @@ private fun ColumnScope.RoomBrowser(
 }
 
 @Composable
-fun OpponentPanel(snapshot: OpponentSnapshot?, modifier: Modifier = Modifier) {
+fun OpponentPanel(players: List<LanPlayer>, modifier: Modifier = Modifier) {
     Card(
         modifier = modifier,
         colors = CardDefaults.cardColors(containerColor = LanPanel.copy(alpha = 0.92f)),
@@ -182,17 +231,47 @@ fun OpponentPanel(snapshot: OpponentSnapshot?, modifier: Modifier = Modifier) {
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Text("对手", style = MaterialTheme.typography.labelLarge, color = Color.White)
-            Text("OPPONENT", style = MaterialTheme.typography.labelSmall, color = Color(0xFFA7D8FC))
-            if (snapshot == null) {
+            Text("${players.size} PLAYERS", style = MaterialTheme.typography.labelSmall, color = Color(0xFFA7D8FC))
+            if (players.isEmpty()) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("等待状态", color = Color(0xFFB8DDF8), style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
+                    Text("等待玩家", color = Color(0xFFB8DDF8), style = MaterialTheme.typography.labelMedium, textAlign = TextAlign.Center)
                 }
             } else {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                players.forEach { player ->
+                    OpponentTile(player = player, modifier = Modifier.weight(1f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OpponentTile(player: LanPlayer, modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF082B62)),
+        shape = RoundedCornerShape(8.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (player.isAlive) LanStroke.copy(alpha = 0.65f) else Color(0xFF7B8A9D))
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize().padding(horizontal = 3.dp, vertical = 3.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                if (player.isAlive) player.name.take(7) else "${player.name.take(5)} 淘汰",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (player.isAlive) Color.White else Color(0xFF9CADBF),
+                textAlign = TextAlign.Center
+            )
+            player.snapshot?.let { snapshot ->
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     RemoteMetric("分", snapshot.score.toString())
                     RemoteMetric("行", snapshot.lines.toString())
                 }
                 OpponentBoard(snapshot, modifier = Modifier.fillMaxWidth().weight(1f))
+            } ?: Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("等待状态", color = Color(0xFFB8DDF8), style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.Center)
             }
         }
     }
@@ -202,7 +281,7 @@ fun OpponentPanel(snapshot: OpponentSnapshot?, modifier: Modifier = Modifier) {
 private fun RemoteMetric(label: String, value: String) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(label, style = MaterialTheme.typography.labelSmall, color = Color(0xFF9BCFF5))
-        Text(value, style = MaterialTheme.typography.labelMedium, color = Color.White)
+        Text(value, style = MaterialTheme.typography.labelSmall, color = Color.White)
     }
 }
 
@@ -227,9 +306,7 @@ private fun OpponentBoard(snapshot: OpponentSnapshot, modifier: Modifier = Modif
             for ((x, y) in shape) {
                 val row = piece.row + y
                 val column = piece.column + x
-                if (row in 0 until TetrisGame.ROWS && column in 0 until TetrisGame.COLUMNS) {
-                    drawRemoteOutline(column * cell, row * cell, cell)
-                }
+                if (row in 0 until TetrisGame.ROWS && column in 0 until TetrisGame.COLUMNS) drawRemoteOutline(column * cell, row * cell, cell)
             }
         }
         snapshot.activePiece?.let { piece ->
@@ -238,9 +315,7 @@ private fun OpponentBoard(snapshot: OpponentSnapshot, modifier: Modifier = Modif
             for ((x, y) in shape) {
                 val row = piece.row + y
                 val column = piece.column + x
-                if (row in 0 until TetrisGame.ROWS && column in 0 until TetrisGame.COLUMNS) {
-                    drawRemoteBlock(color, column * cell, row * cell, cell)
-                }
+                if (row in 0 until TetrisGame.ROWS && column in 0 until TetrisGame.COLUMNS) drawRemoteBlock(color, column * cell, row * cell, cell)
             }
         }
     }

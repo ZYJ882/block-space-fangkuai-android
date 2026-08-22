@@ -93,7 +93,7 @@ import com.blockspace.tetris.network.LanLobbyScreen
 import com.blockspace.tetris.network.LanMultiplayerManager
 import com.blockspace.tetris.network.LanStatus
 import com.blockspace.tetris.network.OpponentPanel
-import com.blockspace.tetris.network.OpponentSnapshot
+import com.blockspace.tetris.network.LanPlayer
 import com.blockspace.tetris.game.PieceLibrary
 import com.blockspace.tetris.game.TetrisGame
 import com.blockspace.tetris.game.TetrominoType
@@ -203,7 +203,7 @@ fun TetrisApp() {
 
     LaunchedEffect(game, hasStarted, appIsActive, timingRevision, lanState.status, lanState.pendingGarbageLines) {
         if (!hasStarted || !appIsActive || game.isPaused || game.isGameOver ||
-            (showLanLobby && lanState.status != LanStatus.CONNECTED)
+            (showLanLobby && lanState.status != LanStatus.PLAYING)
         ) return@LaunchedEffect
 
         val pendingGarbage = lanManager.consumePendingGarbage()
@@ -240,7 +240,7 @@ fun TetrisApp() {
     }
 
     LaunchedEffect(showLanLobby, lanState.status, lanMatchStarted) {
-        if (showLanLobby && lanState.status == LanStatus.CONNECTED && !lanMatchStarted) {
+        if (showLanLobby && lanState.status == LanStatus.PLAYING && !lanMatchStarted) {
             updateGame {
                 game.setPieceRandomizerMode(controlSettings.pieceRandomizer)
                 game.startNewGame()
@@ -253,12 +253,13 @@ fun TetrisApp() {
     }
 
     when {
-        showLanLobby && lanState.status != LanStatus.CONNECTED -> {
+        showLanLobby && lanState.status !in setOf(LanStatus.PLAYING, LanStatus.FINISHED) -> {
             LanLobbyScreen(
                 state = lanState,
                 onCreateRoom = { lanManager.hostRoom("PLAYER") },
                 onRefresh = { lanManager.startDiscovery() },
                 onJoinRoom = lanManager::joinRoom,
+                onStartMatch = lanManager::startMatch,
                 onBack = {
                     lanManager.close()
                     showLanLobby = false
@@ -289,8 +290,14 @@ fun TetrisApp() {
                 GameScreen(
                 game = game,
                 revision = revision,
-                isLanBattle = showLanLobby && lanMatchStarted && lanState.status == LanStatus.CONNECTED,
-                opponent = lanState.opponent,
+                isLanBattle = showLanLobby && lanMatchStarted && lanState.status in setOf(LanStatus.PLAYING, LanStatus.FINISHED),
+                opponents = lanState.remotePlayers,
+                matchWinnerName = lanState.winnerName,
+                onExitLanMatch = {
+                    lanManager.close()
+                    showLanLobby = false
+                    lanMatchStarted = false
+                },
                 onMoveLeft = {
                     updateGame {
                         game.moveLeft().also { if (it) soundPlayer.play(GameSoundEffect.MOVE) }
@@ -442,7 +449,9 @@ private fun GameScreen(
     game: TetrisGame,
     revision: Int,
     isLanBattle: Boolean,
-    opponent: OpponentSnapshot?,
+    opponents: List<LanPlayer>,
+    matchWinnerName: String?,
+    onExitLanMatch: () -> Unit,
     onMoveLeft: () -> Unit,
     onMoveRight: () -> Unit,
     onRotate: () -> Unit,
@@ -540,6 +549,18 @@ private fun GameScreen(
                             modifier = Modifier.fillMaxSize()
                         )
                         when {
+                            isLanBattle && matchWinnerName != null -> GameOverlay(
+                                title = "比赛结束",
+                                subtitle = "胜者：$matchWinnerName",
+                                buttonLabel = "退出比赛",
+                                onClick = onExitLanMatch
+                            )
+                            isLanBattle && game.isGameOver -> GameOverlay(
+                                title = "已淘汰",
+                                subtitle = "等待其他玩家完成比赛",
+                                buttonLabel = "退出比赛",
+                                onClick = onExitLanMatch
+                            )
                             game.isGameOver -> GameOverlay(
                                 title = "游戏结束",
                                 subtitle = "本局得分 ${game.score}",
@@ -562,7 +583,7 @@ private fun GameScreen(
                     )
                     if (isLanBattle) {
                         OpponentPanel(
-                            snapshot = opponent,
+                            players = opponents,
                             modifier = Modifier
                                 .width(opponentWidth)
                                 .fillMaxHeight()
